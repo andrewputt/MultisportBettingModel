@@ -1,0 +1,62 @@
+[
+  {
+    "GAME_ID": "0022400061",
+    "GAME_DATE": "2024-10-22",
+    "TEAM_ABBREVIATION": "BOS",
+    "MATCHUP": "BOS vs. NYK",
+    "WL": "W",
+    "PTS": 132,
+    "FG_PCT": 0.505,
+    "REB": 40,
+    "AST": 33,
+    "PLUS_MINUS": 23
+  },
+  {
+    "GAME_ID": "0022400062",
+    "GAME_DATE": "2024-10-22",
+    "TEAM_ABBREVIATION": "MIN",
+    "MATCHUP": "MIN @ LAL",
+    "WL": "L",
+    "PTS": 103,
+    "FG_PCT": 0.412,
+    "REB": 47,
+    "AST": 17,
+    "PLUS_MINUS": -7
+  },
+  {
+    "GAME_ID": "0022400062",
+    "GAME_DATE": "2024-10-22",
+    "TEAM_ABBREVIATION": "LAL",
+    "MATCHUP": "LAL vs. MIN",
+    "WL": "W",
+    "PTS": 110,
+    "FG_PCT": 0.442,
+    "REB": 46,
+    "AST": 22,
+    "PLUS_MINUS": 7
+  },
+  {
+    "GAME_ID": "0022400061",
+    "GAME_DATE": "2024-10-22",
+    "TEAM_ABBREVIATION": "NYK",
+    "MATCHUP": "NYK @ BOS",
+    "WL": "L",
+    "PTS": 109,
+    "FG_PCT": 0.551,
+    "REB": 34,
+    "AST": 20,
+    "PLUS_MINUS": -23
+  },
+  {
+    "GAME_ID": "0022400072",
+    "GAME_DATE": "2024-10-23",
+    "TEAM_ABBREVIATION": "GSW",
+    "MATCHUP": "GSW @ POR",
+    "WL": "W",
+    "PTS": 140,
+    "FG_PCT": 0.516,
+    "REB": 57,
+    "AST": 38,
+    "PLUS_MINUS": 36
+  }
+]

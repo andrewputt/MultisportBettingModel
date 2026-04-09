@@ -1,0 +1,14 @@
+# Secrets
+.env
+
+# Data (Don't push huge CSVs to GitHub)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+
+# Python junk
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.vscode/

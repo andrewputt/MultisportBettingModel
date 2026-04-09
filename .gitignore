@@ -12,3 +12,6 @@ __pycache__/
 *$py.class
 venv/
 .vscode/
+
+# Kalshi Private Key
+kalshi_key.pem

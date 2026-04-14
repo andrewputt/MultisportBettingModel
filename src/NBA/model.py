@@ -23,10 +23,10 @@ df = df.dropna(subset=feature_cols + ["WIN"])
 X = df[feature_cols]
 y = df["WIN"]
 
-# Train/test split
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+df = df.sort_values("GAME_DATE")
+split = int(len(df) * 0.8)
+X_train, X_test = X.iloc[:split], X.iloc[split:]
+y_train, y_test = y.iloc[:split], y.iloc[split:]
 
 # Train model
 model = LogisticRegression(max_iter=1000)

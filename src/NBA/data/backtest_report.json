@@ -1,0 +1,16 @@
+{
+  "backtest_date": "2026-04-15T17:47:07.524511",
+  "months_tested": 6,
+  "total_games": 2370,
+  "features_used": [
+    "IS_HOME",
+    "REST_DAYS",
+    "WIN_PCT_L10",
+    "OFF_RATING_L10",
+    "DEF_RATING_L10",
+    "PACE_PROXY_L10",
+    "PM_TREND_L10"
+  ],
+  "avg_accuracy": 0.6058,
+  "total_simulated_pnl": 47600.0
+}

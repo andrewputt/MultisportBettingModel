@@ -89,5 +89,5 @@ sample["GAME_DATE"] = sample["GAME_DATE"].astype(str)
 with open("src/NBA/data/sample_features.json", "w") as f:
     json.dump(sample.to_dict(orient="records"), f, indent=2)
 
-print(f"✅ Engineered features for {len(df_out)} games")
+print(f"Engineered features for {len(df_out)} games")
 print(df_out.head(3).to_string())

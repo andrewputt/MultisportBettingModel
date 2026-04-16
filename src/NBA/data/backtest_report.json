@@ -1,7 +1,7 @@
 {
-  "backtest_date": "2026-04-16T08:53:00.238606",
-  "months_tested": 6,
-  "total_games": 2364,
+  "backtest_date": "2026-04-16T14:19:40.162357",
+  "months_tested": 33,
+  "total_games": 11904,
   "features_used": [
     "IS_HOME",
     "REST_DAYS",
@@ -16,6 +16,6 @@
     "OPP_PACE_PROXY_L10",
     "OPP_PM_TREND_L10"
   ],
-  "avg_accuracy": 0.6606000000000001,
-  "total_simulated_pnl": 73000.0
+  "avg_accuracy": 0.6163151515151515,
+  "total_simulated_pnl": 280400.0
 }

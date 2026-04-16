@@ -10,7 +10,8 @@
     "REB": 40,
     "AST": 22,
     "PLUS_MINUS": 7,
-    "SEASON": "2020-21"
+    "SEASON": "2020-21",
+    "IS_PLAYOFF": 0
   },
   {
     "GAME_ID": "0022000002",
@@ -23,7 +24,8 @@
     "REB": 45,
     "AST": 22,
     "PLUS_MINUS": -7,
-    "SEASON": "2020-21"
+    "SEASON": "2020-21",
+    "IS_PLAYOFF": 0
   },
   {
     "GAME_ID": "0022000001",
@@ -36,7 +38,8 @@
     "REB": 47,
     "AST": 26,
     "PLUS_MINUS": -26,
-    "SEASON": "2020-21"
+    "SEASON": "2020-21",
+    "IS_PLAYOFF": 0
   },
   {
     "GAME_ID": "0022000001",
@@ -49,7 +52,8 @@
     "REB": 57,
     "AST": 24,
     "PLUS_MINUS": 26,
-    "SEASON": "2020-21"
+    "SEASON": "2020-21",
+    "IS_PLAYOFF": 0
   },
   {
     "GAME_ID": "0022000010",
@@ -62,6 +66,7 @@
     "REB": 50,
     "AST": 34,
     "PLUS_MINUS": 7,
-    "SEASON": "2020-21"
+    "SEASON": "2020-21",
+    "IS_PLAYOFF": 0
   }
 ]

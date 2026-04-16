@@ -10,12 +10,18 @@ df = pd.read_csv("src/NBA/data/features.csv")
 # Features and target
 feature_cols = [
     "IS_HOME",
+    "IS_PLAYOFF",
     "REST_DAYS",
     "WIN_PCT_L10",
     "OFF_RATING_L10",
     "DEF_RATING_L10",
     "PACE_PROXY_L10",
     "PM_TREND_L10",
+    "OPP_WIN_PCT_L10",
+    "OPP_OFF_RATING_L10",
+    "OPP_DEF_RATING_L10",
+    "OPP_PACE_PROXY_L10",
+    "OPP_PM_TREND_L10",
 ]
 
 df = df.dropna(subset=feature_cols + ["WIN"])

@@ -22,12 +22,14 @@ fields = [
 
 frames = []
 for season in SEASONS:
-    print(f"Fetching {season}...")
-    logs = leaguegamelog.LeagueGameLog(season=season, season_type_all_star="Regular Season")
-    df = logs.get_data_frames()[0][fields]
-    df["SEASON"] = season
-    frames.append(df)
-    time.sleep(1)  # avoid rate limiting
+    for season_type, label in [("Regular Season", 0), ("Playoffs", 1)]:
+        print(f"Fetching {season} {season_type}...")
+        logs = leaguegamelog.LeagueGameLog(season=season, season_type_all_star=season_type)
+        df = logs.get_data_frames()[0][fields]
+        df["SEASON"] = season
+        df["IS_PLAYOFF"] = label
+        frames.append(df)
+        time.sleep(1)  # avoid rate limiting
 
 combined = pd.concat(frames, ignore_index=True)
 combined.to_csv("src/NBA/data/game_logs.csv", index=False)
@@ -37,4 +39,4 @@ sample = combined.head(5).to_dict(orient="records")
 with open("src/NBA/data/sample_game_logs.json", "w") as f:
     json.dump(sample, f, indent=2)
 
-print(f"Saved {len(combined)} rows across {len(SEASONS)} seasons to CSV + JSON sample")
+print(f"Saved {len(combined)} rows across {len(SEASONS)} seasons (regular + playoffs) to CSV + JSON sample")

@@ -56,6 +56,7 @@ def run_walk_forward_backtest():
     # Parse GAME_DATE and drop rows with NaN in critical columns
     feature_cols = [
         "IS_HOME",
+        "IS_PLAYOFF",
         "REST_DAYS",
         "WIN_PCT_L10",
         "OFF_RATING_L10",
@@ -74,7 +75,7 @@ def run_walk_forward_backtest():
     df = df.sort_values("GAME_DATE").reset_index(drop=True)
     
     if len(df) == 0:
-        print("❌ No valid data found after dropping NaNs.")
+        print(" No valid data found after dropping NaNs.")
         return
     
     # Extract year-month for grouping
@@ -84,10 +85,10 @@ def run_walk_forward_backtest():
     months = sorted(df["YEAR_MONTH"].unique())
     
     if len(months) < 2:
-        print(f"⚠️  Only {len(months)} month(s) available. Walk-forward backtest requires at least 2 months.")
+        print(f"  Only {len(months)} month(s) available. Walk-forward backtest requires at least 2 months.")
         return
     
-    print(f"\n📊 Walk-Forward Backtest: {len(months)} months from {months[0]} to {months[-1]}")
+    print(f"\n Walk-Forward Backtest: {len(months)} months from {months[0]} to {months[-1]}")
     print("=" * 80)
     
     results = []
@@ -107,7 +108,7 @@ def run_walk_forward_backtest():
         
         # Skip if no training or test data
         if len(X_train) == 0 or len(X_test) == 0:
-            print(f"⏭️  {test_month}: Skipping (insufficient data)")
+            print(f"  {test_month}: Skipping (insufficient data)")
             continue
         
         # Train and evaluate
@@ -132,17 +133,17 @@ def run_walk_forward_backtest():
         all_test_actuals.extend(y_test)
         final_model = model
         
-        print(f"✅ {test_month}: Accuracy={accuracy:.2%} | Precision={precision:.2%} | Recall={recall:.2%} | ROI={roi:.2f}% | P&L=${pnl:,.2f} ({num_games} games)")
+        print(f" {test_month}: Accuracy={accuracy:.2%} | Precision={precision:.2%} | Recall={recall:.2%} | ROI={roi:.2f}% | P&L=${pnl:,.2f} ({num_games} games)")
     
     # Save results to CSV
     results_df = pd.DataFrame(results)
     os.makedirs("src/NBA/data", exist_ok=True)
     results_df.to_csv("src/NBA/data/backtest_results.csv", index=False)
-    print("\n✅ Backtest results saved to src/NBA/data/backtest_results.csv")
+    print("\n Backtest results saved to src/NBA/data/backtest_results.csv")
     
     # Print summary statistics
     print("\n" + "=" * 80)
-    print("📈 Summary Statistics:")
+    print(" Summary Statistics:")
     print(f"  Total Months Tested: {len(results)}")
     print(f"  Avg Accuracy: {results_df['ACCURACY'].mean():.2%}")
     print(f"  Avg Precision: {results_df['PRECISION'].mean():.2%}")
@@ -163,7 +164,7 @@ def run_walk_forward_backtest():
         os.makedirs("src/NBA/models", exist_ok=True)
         with open("src/NBA/models/nba_model.pkl", "wb") as f:
             pickle.dump(final_model_all, f)
-        print(f"\n✅ Final model trained on all data and saved to src/NBA/models/nba_model.pkl")
+        print(f"\n Final model trained on all data and saved to src/NBA/models/nba_model.pkl")
     
     # Save backtest metadata
     metadata = {
@@ -178,7 +179,7 @@ def run_walk_forward_backtest():
     import json
     with open("src/NBA/data/backtest_report.json", "w") as f:
         json.dump(metadata, f, indent=2)
-    print("✅ Backtest metadata saved to src/NBA/data/backtest_report.json")
+    print(" Backtest metadata saved to src/NBA/data/backtest_report.json")
 
 
 if __name__ == "__main__":

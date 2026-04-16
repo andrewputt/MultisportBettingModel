@@ -11,6 +11,7 @@
     "AST": 24,
     "PLUS_MINUS": 20,
     "SEASON": "2020-21",
+    "IS_PLAYOFF": 0,
     "WIN": 1,
     "REST_DAYS": 0.0,
     "IS_HOME": 0
@@ -27,6 +28,7 @@
     "AST": 23,
     "PLUS_MINUS": 10,
     "SEASON": "2020-21",
+    "IS_PLAYOFF": 0,
     "WIN": 1,
     "REST_DAYS": 3.0,
     "IS_HOME": 0
@@ -43,6 +45,7 @@
     "AST": 30,
     "PLUS_MINUS": 8,
     "SEASON": "2020-21",
+    "IS_PLAYOFF": 0,
     "WIN": 1,
     "REST_DAYS": 2.0,
     "IS_HOME": 1
@@ -59,6 +62,7 @@
     "AST": 27,
     "PLUS_MINUS": -4,
     "SEASON": "2020-21",
+    "IS_PLAYOFF": 0,
     "WIN": 0,
     "REST_DAYS": 2.0,
     "IS_HOME": 0
@@ -75,6 +79,7 @@
     "AST": 24,
     "PLUS_MINUS": 18,
     "SEASON": "2020-21",
+    "IS_PLAYOFF": 0,
     "WIN": 1,
     "REST_DAYS": 2.0,
     "IS_HOME": 0

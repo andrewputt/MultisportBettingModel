@@ -65,6 +65,7 @@ feature_cols = [
     "TEAM_ABBREVIATION",
     "MATCHUP",
     "IS_HOME",
+    "IS_PLAYOFF",
     "REST_DAYS",
     "WIN",
     "WIN_PCT_L10",

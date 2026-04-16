@@ -42,4 +42,4 @@ for row in sample:
 with open("src/NBA/data/sample_clean.json", "w") as f:
     json.dump(sample, f, indent=2)
 
-print("✅ Saved game_logs_clean.csv and sample_clean.json")
+print("Saved game_logs_clean.csv and sample_clean.json")

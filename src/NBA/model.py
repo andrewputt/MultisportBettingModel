@@ -35,11 +35,11 @@ model.fit(X_train, y_train)
 # Evaluate
 preds = model.predict(X_test)
 acc = accuracy_score(y_test, preds)
-print(f"✅ Model accuracy: {acc:.2%}")
+print(f"Model accuracy: {acc:.2%}")
 
 # Save model
 os.makedirs("src/NBA/models", exist_ok=True)
 with open("src/NBA/models/nba_model.pkl", "wb") as f:
     pickle.dump(model, f)
 
-print("✅ Model saved to src/NBA/models/nba_model.pkl")
+print("Model saved to src/NBA/models/nba_model.pkl")

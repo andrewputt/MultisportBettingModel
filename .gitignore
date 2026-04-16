@@ -15,3 +15,6 @@ venv/
 
 # Kalshi Private Key
 kalshi_key.pem
+
+# DS_Store
+.DS_Store

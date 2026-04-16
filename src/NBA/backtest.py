@@ -62,6 +62,11 @@ def run_walk_forward_backtest():
         "DEF_RATING_L10",
         "PACE_PROXY_L10",
         "PM_TREND_L10",
+        "OPP_WIN_PCT_L10",
+        "OPP_OFF_RATING_L10",
+        "OPP_DEF_RATING_L10",
+        "OPP_PACE_PROXY_L10",
+        "OPP_PM_TREND_L10",
     ]
     
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])

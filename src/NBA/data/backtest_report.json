@@ -1,7 +1,7 @@
 {
-  "backtest_date": "2026-04-15T17:47:07.524511",
+  "backtest_date": "2026-04-16T08:53:00.238606",
   "months_tested": 6,
-  "total_games": 2370,
+  "total_games": 2364,
   "features_used": [
     "IS_HOME",
     "REST_DAYS",
@@ -9,8 +9,13 @@
     "OFF_RATING_L10",
     "DEF_RATING_L10",
     "PACE_PROXY_L10",
-    "PM_TREND_L10"
+    "PM_TREND_L10",
+    "OPP_WIN_PCT_L10",
+    "OPP_OFF_RATING_L10",
+    "OPP_DEF_RATING_L10",
+    "OPP_PACE_PROXY_L10",
+    "OPP_PM_TREND_L10"
   ],
-  "avg_accuracy": 0.6058,
-  "total_simulated_pnl": 47600.0
+  "avg_accuracy": 0.6606000000000001,
+  "total_simulated_pnl": 73000.0
 }

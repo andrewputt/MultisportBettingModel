@@ -46,6 +46,18 @@ df["PACE_PROXY_L10"] = rolling_avg(df, "REB") + rolling_avg(df, "AST")
 # ── 6. Plus/minus trend ───────────────────────────────────────────
 df["PM_TREND_L10"] = rolling_avg(df, "PLUS_MINUS")
 
+# ── 7. Head-to-head opponent features ────────────────────────────
+# Build a lookup of each team's L10 stats per game, then merge onto
+# the opponent's row so the model sees both sides of the matchup.
+team_stats = df[["GAME_ID", "TEAM_ABBREVIATION",
+                  "WIN_PCT_L10", "OFF_RATING_L10", "DEF_RATING_L10",
+                  "PACE_PROXY_L10", "PM_TREND_L10"]].copy()
+team_stats.columns = ["GAME_ID", "OPP_TEAM",
+                       "OPP_WIN_PCT_L10", "OPP_OFF_RATING_L10", "OPP_DEF_RATING_L10",
+                       "OPP_PACE_PROXY_L10", "OPP_PM_TREND_L10"]
+df = df.merge(team_stats, left_on=["GAME_ID", "OPP_TEAM"],
+              right_on=["GAME_ID", "OPP_TEAM"], how="left")
+
 # ── Save ──────────────────────────────────────────────────────────
 feature_cols = [
     "GAME_ID",
@@ -62,6 +74,11 @@ feature_cols = [
     "DEF_RATING_L10",
     "PACE_PROXY_L10",
     "PM_TREND_L10",
+    "OPP_WIN_PCT_L10",
+    "OPP_OFF_RATING_L10",
+    "OPP_DEF_RATING_L10",
+    "OPP_PACE_PROXY_L10",
+    "OPP_PM_TREND_L10",
 ]
 df_out = df[feature_cols].dropna(subset=["WIN_PCT_L10"])
 df_out.to_csv("src/NBA/data/features.csv", index=False)

@@ -1,5 +1,5 @@
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score
 import pickle
 import os
@@ -7,11 +7,20 @@ from datetime import datetime
 
 def train_and_evaluate(X_train, y_train, X_test, y_test):
     """
-    Train a LogisticRegression model and evaluate on test set.
+    Train an XGBClassifier model and evaluate on test set.
     Returns model, predictions, and metrics.
     """
-    model = LogisticRegression(max_iter=1000, random_state=42)
-    model.fit(X_train, y_train)
+    model = XGBClassifier(
+        n_estimators=300,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        use_label_encoder=False,
+        eval_metric="logloss",
+        random_state=42,
+    )
+    model.fit(X_train, y_train, verbose=False)
     
     preds = model.predict(X_test)
     
@@ -158,8 +167,17 @@ def run_walk_forward_backtest():
         # Re-train on all available data
         X_all = df[feature_cols]
         y_all = df["WIN"]
-        final_model_all = LogisticRegression(max_iter=1000, random_state=42)
-        final_model_all.fit(X_all, y_all)
+        final_model_all = XGBClassifier(
+            n_estimators=300,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            use_label_encoder=False,
+            eval_metric="logloss",
+            random_state=42,
+        )
+        final_model_all.fit(X_all, y_all, verbose=False)
         
         os.makedirs("src/NBA/models", exist_ok=True)
         with open("src/NBA/models/nba_model.pkl", "wb") as f:

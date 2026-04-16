@@ -1,17 +1,19 @@
 """
 predict_today.py
 Fetches today's NBA markets from Kalshi, builds fresh team features from the
-current season, runs the trained model, and compares model win probability
-against Kalshi implied probability to surface edges.
+current season, runs the trained XGBoost model, applies an injury adjustment
+for missing star players, and compares model win probability against Kalshi
+implied probability to surface edges.
 """
 
 import pickle
 import re
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
 import requests
-from nba_api.stats.endpoints import leaguegamelog
+from nba_api.stats.endpoints import leaguegamelog, leaguedashplayerstats, playergamelog
 
 # ── Feature columns expected by the model ─────────────────────────────────────
 FEATURE_COLS = [
@@ -33,6 +35,10 @@ ABB_TO_NAME = {
     "UTA": "Utah", "WAS": "Washington",
 }
 
+# Penalty applied per missing star player (as a fraction of win probability)
+# e.g. 0.06 = lose 6 percentage points per missing star
+INJURY_PENALTY_PER_STAR = 0.06
+
 
 # ── 1. Fetch current season game logs and compute rolling features ─────────────
 def get_current_season_features():
@@ -45,7 +51,7 @@ def get_current_season_features():
         part = logs.get_data_frames()[0][fields].copy()
         part["IS_PLAYOFF"] = label
         frames.append(part)
-        import time; time.sleep(1)
+        time.sleep(1)
     df = pd.concat(frames, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
     df["WIN"] = df["WL"].map({"W": 1, "L": 0})
@@ -70,7 +76,6 @@ def get_current_season_features():
     df["PACE_PROXY_L10"] = roll("REB") + roll("AST")
     df["PM_TREND_L10"] = roll("PLUS_MINUS")
 
-    # Most recent row per team
     latest = (
         df.dropna(subset=["WIN_PCT_L10"])
         .sort_values("GAME_DATE")
@@ -82,7 +87,71 @@ def get_current_season_features():
     return latest
 
 
-# ── 2. Fetch Kalshi NBA markets ────────────────────────────────────────────────
+# ── 2. Injury detection ────────────────────────────────────────────────────────
+def get_injury_report(team_abbs):
+    """
+    For each team, fetch the top 3 players by minutes played this season.
+    Then check their last 5 game logs. If a player has 0 games in the last
+    5 days while their team played, they are flagged as likely out.
+
+    Returns: dict of {team_abb: [list of missing star names]}
+    """
+    print("Fetching player stats for injury detection...")
+
+    # Get all player stats for current season (both regular + playoffs)
+    stats = leaguedashplayerstats.LeagueDashPlayerStats(
+        season="2025-26",
+        season_type_all_star="Playoffs",
+        per_mode_detailed="PerGame",
+    ).get_data_frames()[0]
+    time.sleep(1)
+
+    # Filter to teams we care about and get top 3 starters by minutes
+    stars_by_team = {}
+    for abb in team_abbs:
+        team_players = stats[stats["TEAM_ABBREVIATION"] == abb].copy()
+        if team_players.empty:
+            stars_by_team[abb] = []
+            continue
+        top = team_players.nlargest(3, "MIN")[["PLAYER_ID", "PLAYER_NAME", "MIN"]]
+        stars_by_team[abb] = top.to_dict("records")
+
+    # Check recent game logs for each star player
+    today = datetime.now(timezone.utc).date()
+    missing = {abb: [] for abb in team_abbs}
+
+    all_players = [p for players in stars_by_team.values() for p in players]
+    for player in all_players:
+        pid = player["PLAYER_ID"]
+        name = player["PLAYER_NAME"]
+        abb = next(a for a, ps in stars_by_team.items() if any(p["PLAYER_ID"] == pid for p in ps))
+        try:
+            logs = playergamelog.PlayerGameLog(
+                player_id=pid, season="2025-26", season_type_all_star="Playoffs"
+            ).get_data_frames()[0]
+            time.sleep(0.6)
+            if logs.empty:
+                missing[abb].append(name)
+                continue
+            last_game = pd.to_datetime(logs["GAME_DATE"].iloc[0])
+            days_since = (pd.Timestamp(today) - last_game).days
+            # Flag as missing if they haven't played in 6+ days
+            # (accounts for typical playoff schedule gaps of 2-3 days)
+            if days_since >= 6:
+                missing[abb].append(name)
+        except Exception:
+            pass  # API hiccup — don't penalize
+
+    for abb in team_abbs:
+        if missing[abb]:
+            print(f"  {abb} missing stars: {', '.join(missing[abb])}")
+        else:
+            print(f"  {abb}: all stars active")
+
+    return missing
+
+
+# ── 3. Fetch Kalshi NBA markets ────────────────────────────────────────────────
 def fetch_kalshi_markets():
     resp = requests.get(
         "https://api.elections.kalshi.com/trade-api/v2/markets",
@@ -95,11 +164,6 @@ def fetch_kalshi_markets():
 
 
 def parse_teams_from_event_ticker(event_ticker):
-    """
-    Extract (away_abb, home_abb) from event ticker.
-    Format: KXNBAGAME-26APR17GSWPHX -> away=GSW, home=PHX (last 6 chars = 3+3)
-    """
-    # Strip prefix and date: KXNBAGAME-26APR17GSWPHX -> GSWPHX
     match = re.search(r"\d{2}[A-Z]{3}\d{2}([A-Z]{6})$", event_ticker)
     if match:
         code = match.group(1)
@@ -128,11 +192,10 @@ def parse_markets(markets):
             print(f"  [WARN] Unknown abbreviation in {event}: {away_abb} or {home_abb}")
             continue
 
-        # Map yes_sub_title → implied probability using the ticker suffix (last 3 chars)
         implied = {}
         for side in sides:
             ticker = side.get("ticker", "")
-            team_abb = ticker.split("-")[-1]  # e.g. KXNBAGAME-26APR17GSWPHX-PHX -> PHX
+            team_abb = ticker.split("-")[-1]
             if team_abb in ABB_TO_NAME:
                 implied[team_abb] = float(side.get("yes_ask_dollars", 0))
 
@@ -152,7 +215,7 @@ def parse_markets(markets):
     return parsed
 
 
-# ── 3. Build feature rows and run model ───────────────────────────────────────
+# ── 4. Build feature rows, run model, apply injury adjustment ─────────────────
 def get_team_stats(team_stats, abb):
     row = team_stats[team_stats["TEAM_ABBREVIATION"] == abb]
     return row.iloc[0] if not row.empty else None
@@ -180,7 +243,14 @@ def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats):
     }
 
 
-def run_predictions(games, team_stats, model):
+def apply_injury_adjustment(prob, team_abb, missing_stars):
+    """Reduce win probability by INJURY_PENALTY_PER_STAR for each missing star."""
+    n_missing = len(missing_stars.get(team_abb, []))
+    adjusted = prob - (n_missing * INJURY_PENALTY_PER_STAR)
+    return round(max(0.01, min(0.99, adjusted)), 4)
+
+
+def run_predictions(games, team_stats, model, missing_stars):
     results = []
     for game in games:
         away_row = build_row(game["away_abb"], game["home_abb"], 0, 1, team_stats)
@@ -193,27 +263,31 @@ def run_predictions(games, team_stats, model):
         df_input = pd.DataFrame([away_row, home_row])[FEATURE_COLS]
         probs = model.predict_proba(df_input)[:, 1]
 
-        away_model_prob = round(float(probs[0]), 4)
-        home_model_prob = round(float(probs[1]), 4)
+        away_base = round(float(probs[0]), 4)
+        home_base = round(float(probs[1]), 4)
+
+        away_adj = apply_injury_adjustment(away_base, game["away_abb"], missing_stars)
+        home_adj = apply_injury_adjustment(home_base, game["home_abb"], missing_stars)
 
         away_implied = game["away_implied"]
         home_implied = game["home_implied"]
 
-        away_edge = round(away_model_prob - away_implied, 4) if away_implied is not None else None
-        home_edge = round(home_model_prob - home_implied, 4) if home_implied is not None else None
-
         matchup = f"{game['away']} @ {game['home']}"
-        for abb, name, is_home, model_prob, implied, edge in [
-            (game["away_abb"], game["away"], 0, away_model_prob, away_implied, away_edge),
-            (game["home_abb"], game["home"], 1, home_model_prob, home_implied, home_edge),
+        for abb, name, is_home, base_prob, adj_prob, implied in [
+            (game["away_abb"], game["away"], 0, away_base, away_adj, away_implied),
+            (game["home_abb"], game["home"], 1, home_base, home_adj, home_implied),
         ]:
+            n_missing = len(missing_stars.get(abb, []))
+            edge = round(adj_prob - implied, 4) if implied is not None else None
             results.append({
                 "GAME_DATE": game["game_date"],
                 "MATCHUP": matchup,
                 "TEAM": name,
                 "ABB": abb,
                 "IS_HOME": is_home,
-                "MODEL_PROB": model_prob,
+                "MODEL_PROB": base_prob,
+                "INJ_ADJUSTED_PROB": adj_prob,
+                "STARS_OUT": n_missing,
                 "KALSHI_IMPLIED": implied,
                 "EDGE": edge,
             })
@@ -231,7 +305,11 @@ if __name__ == "__main__":
     games = parse_markets(markets)
     print(f"Parsed {len(games)} unique games from Kalshi")
 
-    df = run_predictions(games, team_stats, model)
+    # Get all unique team abbreviations across today's games
+    all_teams = list({abb for g in games for abb in [g["away_abb"], g["home_abb"]]})
+    missing_stars = get_injury_report(all_teams)
+
+    df = run_predictions(games, team_stats, model, missing_stars)
 
     if df.empty:
         print("No predictions generated.")
@@ -247,7 +325,8 @@ if __name__ == "__main__":
         edges = df[df["EDGE"].notna() & (df["EDGE"] >= 0.05)]
         if not edges.empty:
             print("\n--- EDGES >= 5% (potential value bets) ---")
-            print(edges[["GAME_DATE", "MATCHUP", "TEAM", "MODEL_PROB", "KALSHI_IMPLIED", "EDGE"]].to_string(index=False))
+            print(edges[["GAME_DATE", "MATCHUP", "TEAM", "INJ_ADJUSTED_PROB",
+                          "STARS_OUT", "KALSHI_IMPLIED", "EDGE"]].to_string(index=False))
         else:
             print("\nNo edges >= 5% found.")
 

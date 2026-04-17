@@ -21,6 +21,7 @@ FEATURE_COLS = [
     "OFF_RATING_L10", "DEF_RATING_L10", "PACE_PROXY_L10", "PM_TREND_L10",
     "OPP_WIN_PCT_L10", "OPP_OFF_RATING_L10", "OPP_DEF_RATING_L10",
     "OPP_PACE_PROXY_L10", "OPP_PM_TREND_L10",
+    "SERIES_GAME_NUM", "SERIES_WINS", "SERIES_LOSSES",
 ]
 
 # ── Abbreviation → display name ────────────────────────────────────────────────
@@ -84,7 +85,24 @@ def get_current_season_features():
         .reset_index()
     )
     print(f"  Got stats for {len(latest)} teams (last game: {latest['GAME_DATE'].max().date()})")
-    return latest
+
+    # Build series context for each (team, opponent) pair currently in playoffs.
+    # Values represent totals from games already played — used as context for the next game.
+    series_context = {}
+    playoff_games = df[df["IS_PLAYOFF"] == 1].copy()
+    if not playoff_games.empty:
+        for (team, opp), grp in playoff_games.groupby(["TEAM_ABBREVIATION", "OPP_TEAM"]):
+            grp = grp.sort_values("GAME_DATE")
+            n_played = len(grp)
+            n_wins = int(grp["WIN"].sum())
+            series_context[(team, opp)] = {
+                "SERIES_GAME_NUM": n_played + 1,
+                "SERIES_WINS": n_wins,
+                "SERIES_LOSSES": n_played - n_wins,
+            }
+        print(f"  Computed series context for {len(series_context)} team-opponent pairs")
+
+    return latest, series_context
 
 
 # ── 2. Injury detection ────────────────────────────────────────────────────────
@@ -221,11 +239,12 @@ def get_team_stats(team_stats, abb):
     return row.iloc[0] if not row.empty else None
 
 
-def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats):
+def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats, series_context=None):
     t = get_team_stats(team_stats, team_abb)
     o = get_team_stats(team_stats, opp_abb)
     if t is None or o is None:
         return None
+    sc = (series_context or {}).get((team_abb, opp_abb), {})
     return {
         "IS_HOME": is_home,
         "IS_PLAYOFF": is_playoff,
@@ -240,6 +259,9 @@ def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats):
         "OPP_DEF_RATING_L10": o["DEF_RATING_L10"],
         "OPP_PACE_PROXY_L10": o["PACE_PROXY_L10"],
         "OPP_PM_TREND_L10": o["PM_TREND_L10"],
+        "SERIES_GAME_NUM": sc.get("SERIES_GAME_NUM", 0),
+        "SERIES_WINS": sc.get("SERIES_WINS", 0),
+        "SERIES_LOSSES": sc.get("SERIES_LOSSES", 0),
     }
 
 
@@ -250,11 +272,11 @@ def apply_injury_adjustment(prob, team_abb, missing_stars):
     return round(max(0.01, min(0.99, adjusted)), 4)
 
 
-def run_predictions(games, team_stats, model, missing_stars):
+def run_predictions(games, team_stats, model, missing_stars, series_context=None):
     results = []
     for game in games:
-        away_row = build_row(game["away_abb"], game["home_abb"], 0, 1, team_stats)
-        home_row = build_row(game["home_abb"], game["away_abb"], 1, 1, team_stats)
+        away_row = build_row(game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context)
+        home_row = build_row(game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context)
 
         if away_row is None or home_row is None:
             print(f"  [WARN] Missing stats for {game['away_abb']} or {game['home_abb']} — skipping")
@@ -300,7 +322,7 @@ if __name__ == "__main__":
     with open("src/NBA/models/nba_model.pkl", "rb") as f:
         model = pickle.load(f)
 
-    team_stats = get_current_season_features()
+    team_stats, series_context = get_current_season_features()
     markets = fetch_kalshi_markets()
     games = parse_markets(markets)
     print(f"Parsed {len(games)} unique games from Kalshi")
@@ -309,7 +331,7 @@ if __name__ == "__main__":
     all_teams = list({abb for g in games for abb in [g["away_abb"], g["home_abb"]]})
     missing_stars = get_injury_report(all_teams)
 
-    df = run_predictions(games, team_stats, model, missing_stars)
+    df = run_predictions(games, team_stats, model, missing_stars, series_context)
 
     if df.empty:
         print("No predictions generated.")

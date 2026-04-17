@@ -21,6 +21,9 @@ feature_cols = [
     "OPP_DEF_RATING_L10",
     "OPP_PACE_PROXY_L10",
     "OPP_PM_TREND_L10",
+    "SERIES_GAME_NUM",
+    "SERIES_WINS",
+    "SERIES_LOSSES",
 ]
 
 df = df.dropna(subset=feature_cols + ["WIN"])

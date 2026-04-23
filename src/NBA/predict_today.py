@@ -301,6 +301,12 @@ def run_predictions(games, team_stats, model, missing_stars, series_context=None
         ]:
             n_missing = len(missing_stars.get(abb, []))
             edge = round(adj_prob - implied, 4) if implied is not None else None
+            # Kelly fraction = edge / (1 - implied_prob). Capped at 25% of bankroll.
+            if edge is not None and edge > 0 and implied is not None and implied < 1:
+                kelly = round(edge / (1 - implied), 4)
+                kelly = min(kelly, 0.25)
+            else:
+                kelly = None
             results.append({
                 "GAME_DATE": game["game_date"],
                 "MATCHUP": matchup,
@@ -312,6 +318,7 @@ def run_predictions(games, team_stats, model, missing_stars, series_context=None
                 "STARS_OUT": n_missing,
                 "KALSHI_IMPLIED": implied,
                 "EDGE": edge,
+                "KELLY_FRACTION": kelly,
             })
 
     return pd.DataFrame(results)
@@ -348,7 +355,7 @@ if __name__ == "__main__":
         if not edges.empty:
             print("\n--- EDGES >= 5% (potential value bets) ---")
             print(edges[["GAME_DATE", "MATCHUP", "TEAM", "INJ_ADJUSTED_PROB",
-                          "STARS_OUT", "KALSHI_IMPLIED", "EDGE"]].to_string(index=False))
+                          "STARS_OUT", "KALSHI_IMPLIED", "EDGE", "KELLY_FRACTION"]].to_string(index=False))
         else:
             print("\nNo edges >= 5% found.")
 

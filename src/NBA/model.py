@@ -1,4 +1,5 @@
 import pandas as pd
+import matplotlib.pyplot as plt
 from xgboost import XGBClassifier
 from sklearn.metrics import accuracy_score
 import pickle
@@ -56,9 +57,27 @@ print(f"Model accuracy: {acc:.2%}")
 
 # Feature importance
 importances = dict(zip(feature_cols, model.feature_importances_))
+sorted_feats = sorted(importances.items(), key=lambda x: x[1])
+
 print("Feature importances:")
-for feat, imp in sorted(importances.items(), key=lambda x: -x[1]):
+for feat, imp in reversed(sorted_feats):
     print(f"  {feat}: {imp:.4f}")
+
+# Save feature importance chart
+labels = [f for f, _ in sorted_feats]
+values = [v for _, v in sorted_feats]
+
+fig, ax = plt.subplots(figsize=(9, 6))
+bars = ax.barh(labels, values, color="#1d428a")
+ax.set_xlabel("Importance Score")
+ax.set_title(f"XGBoost Feature Importances  |  Model Accuracy: {acc:.1%}")
+ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=8)
+plt.tight_layout()
+os.makedirs("src/NBA/models", exist_ok=True)
+chart_path = "src/NBA/models/feature_importance.png"
+plt.savefig(chart_path, dpi=150)
+plt.close()
+print(f"Feature importance chart saved to {chart_path}")
 
 # Save model
 os.makedirs("src/NBA/models", exist_ok=True)

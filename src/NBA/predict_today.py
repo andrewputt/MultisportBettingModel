@@ -6,6 +6,7 @@ for missing star players, and compares model win probability against Kalshi
 implied probability to surface edges.
 """
 
+import os
 import pickle
 import re
 import time
@@ -361,3 +362,10 @@ if __name__ == "__main__":
 
         df.to_csv("src/NBA/data/predictions_today.csv", index=False)
         print("\nSaved to src/NBA/data/predictions_today.csv")
+
+        # Append to running predictions log with timestamp
+        log_path = "src/NBA/data/predictions_log.csv"
+        df["RUN_DATE"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        write_header = not os.path.exists(log_path)
+        df.to_csv(log_path, mode="a", header=write_header, index=False)
+        print(f"Appended {len(df)} predictions to {log_path}")

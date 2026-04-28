@@ -32,30 +32,39 @@ from typing import Optional
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-import requests
-from curl_cffi import requests as cffi_requests
+import numpy as np
+import pybaseball
+from curl_cffi.requests import Session
 
-# ── MONKEY PATCH 3.0 ─────────────────────────────────────────────────────────
-# Globally intercept requests to route B-Ref traffic through curl_cffi bypass
-_original_get = requests.get
-_original_session_request = requests.Session.request
+# ── MONKEY PATCH 1: Cloudflare bypass ────────────────────────────────────────
+# Override pybaseball's internal HTTP session to impersonate Chrome 110 so that
+# Baseball-Reference's Cloudflare WAF does not block the request.
+def get_bref_session():
+    s = Session(impersonate="chrome110")
+    s.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+    return s
 
-def smart_get(url, **kwargs):
-    if isinstance(url, str) and "baseball-reference.com" in url:
-        kwargs.pop("timeout", None) # curl_cffi handles timeouts differently
-        return cffi_requests.get(url, impersonate="chrome120", **kwargs)
-    return _original_get(url, **kwargs)
+pybaseball.datasources.bref.requests = get_bref_session()
 
-def smart_session_request(self, method, url, **kwargs):
-    if isinstance(url, str) and "baseball-reference.com" in url and method.upper() == "GET":
-        kwargs.pop("timeout", None)
-        return cffi_requests.get(url, impersonate="chrome120", **kwargs)
-    return _original_session_request(self, method, url, **kwargs)
+# ── MONKEY PATCH 2: Pandas 3.0 Copy-on-Write compatibility ───────────────────
+# pybaseball/team_results.py line ~75 uses:
+#   df['Attendance'].replace(..., inplace=True)
+# which is illegal in Pandas 3.0 strict CoW mode and raises:
+#   ChainedAssignmentError / "could not convert string to float: 'Unknown'"
+# This wrapper calls the original function then re-cleans Attendance with .loc.
+_original_schedule_and_record = pybaseball.schedule_and_record
 
-# Overwrite the standard library functions before pybaseball initializes
-requests.get = smart_get
-requests.Session.request = smart_session_request
-# ─────────────────────────────────────────────────────────────────────────────
+def fixed_schedule_and_record(season: int, team: str) -> "pd.DataFrame":
+    df = _original_schedule_and_record(season, team)
+    # CoW-safe replacement: use .loc to assign, then to_numeric for coercion
+    if "Attendance" in df.columns:
+        df = df.copy()                                         # own the buffer
+        df.loc[df["Attendance"] == "Unknown", "Attendance"] = np.nan
+        df["Attendance"] = pd.to_numeric(df["Attendance"], errors="coerce")
+    return df
+
+pybaseball.schedule_and_record = fixed_schedule_and_record
+
 # ── env ──────────────────────────────────────────────────────────────────────
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -88,11 +97,11 @@ PYBASEBALL_TEAMS   = [
     "NYM", "CLE", "SEA", "TEX", "DET", "MIL", "STL", "CIN", "PIT", "ARI",
     "MIA", "WSN", "BAL", "TOR",
     # Baseball-Reference / pybaseball URL slugs (differ from ESPN/statsapi) ──
-    "ANA",   # Los Angeles Angels  (LAA on ESPN; ANA on B-Ref)
-    "TBR",   # Tampa Bay Rays      (TB  on ESPN; TBR on B-Ref)
-    "SDP",   # San Diego Padres    (SD  on ESPN; SDP on B-Ref)
-    "KCR",   # Kansas City Royals  (KC  on ESPN; KCR on B-Ref)
-    "CHW",   # Chicago White Sox   (CWS on ESPN; CHW on B-Ref)
+    "LAA",   # Los Angeles Angels
+    "TBR",   # Tampa Bay Rays      (TB  on MLB Stats API; TBR on B-Ref)
+    "SDP",   # San Diego Padres    (SD  on MLB Stats API; SDP on B-Ref)
+    "KCR",   # Kansas City Royals  (KC  on MLB Stats API; KCR on B-Ref)
+    "CWS",   # Chicago White Sox
     "OAK",   # Oakland Athletics
 ]
 
@@ -100,104 +109,108 @@ PYBASEBALL_TEAMS   = [
 # STREAM 1 — KALSHI
 # ─────────────────────────────────────────────────────────────────────────────
 
-from datetime import datetime, timezone
-
+# ── Updated Kalshi Constants ────────────────────────────────────────────────
+# Use the elections/public data URL which allows more open GET requests
 KALSHI_PUBLIC_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
-def _iso_to_unix(iso_str: Optional[str]) -> Optional[int]:
-    """Helper to convert ISO-8601 strings to Unix epoch integers for Kalshi."""
-    if not iso_str:
-        return None
-    dt = datetime.strptime(iso_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    return int(dt.timestamp())
-
 def _fetch_kalshi_markets(series_ticker: str) -> list[dict]:
-    """Fetch markets using the public Elections Kalshi endpoint."""
-    url = f"{KALSHI_PUBLIC_URL}/markets"
+    """Fetch markets using the public Elections Kalshi series endpoint."""
+    # elections.kalshi.com is the public-facing host for event/sports markets
+    # The base markets endpoint
+    url = "https://api.elections.kalshi.com/trade-api/v2/markets"
+
     params = {
-        "series_ticker": series_ticker,
-        "limit": 1000
+        "series_ticker": "KXMLBGAME",  # or your series_ticker variable
+        "status": "open",             # Recommended to only see active bets
+        "limit": 1000                 # Maximize results per call
     }
-    
+
     try:
-        resp = requests.get(url, headers=_kalshi_headers(), params=params, timeout=20)
+        # No params needed; this endpoint returns all markets for the series
+        resp = requests.get(url, params=params, headers=_kalshi_headers(), timeout=20)
         resp.raise_for_status()
         data = resp.json()
+        # Markets are usually under the 'markets' key in the series response
         return data.get("markets", [])
     except Exception as e:
         print(f"    [Kalshi Error] Series fetch failed: {e}")
         return []
 
 def _kalshi_headers() -> dict:
-    return {"Accept": "application/json"}
+    return {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {KALSHI_API_KEY}"
+    }
 
 def _fetch_kalshi_candles(
     market_ticker: str,
     period_interval: int = 60,  # minutes
-    start_ts: Optional[int] = None, # Now expects an integer
-    end_ts: Optional[int] = None,   # Now expects an integer
+    start_ts: Optional[str] = None,
+    end_ts: Optional[str] = None,
 ) -> list[dict]:
     """Fetch OHLCV candlestick data for a single market."""
+    # 1. Use the public URL instead of the private trading base URL
     url = f"{KALSHI_PUBLIC_URL}/markets/{market_ticker}/candlesticks"
     
     params = {"period_interval": period_interval}
-    if start_ts: params["start_ts"] = start_ts
-    if end_ts: params["end_ts"] = end_ts
+    if start_ts:
+        params["start_ts"] = int(pd.to_datetime(start_ts).timestamp())
+    if end_ts:
+        params["end_ts"] = int(pd.to_datetime(end_ts).timestamp())
 
-    resp = requests.get(url, headers=_kalshi_headers(), params=params, timeout=20)
+    # 2. Remove the auth headers, just accept JSON
+    headers = {"Accept": "application/json"}
+
+    resp = requests.get(url, headers=headers, params=params, timeout=20)
     if resp.status_code == 404:
         return []
-    
     resp.raise_for_status()
     return resp.json().get("candlesticks", [])
 
+def _iso_to_unix(iso_str: Optional[str]) -> Optional[int]:
+    if not iso_str:
+        return None
+    return int(pd.to_datetime(iso_str).timestamp())
+
 def fetch_kalshi(output_path: Path) -> None:
     """
-    Pull candlesticks for every KXMLBGAME market across 2025 and 2026 season.
-    Saves a JSON list to output_path.
+    Pull candlesticks for every KXMLBGAME market across 2025 and 2026 season
+    data.  Saves a JSON list to output_path.
     """
     print("[fetch_all_data] Stream 1 — Kalshi candlesticks…")
     markets = _fetch_kalshi_markets(KALSHI_SERIES)
     all_candles: list[dict] = []
 
-    print(f"    Scanning {len(markets)} markets (Estimated time: {len(markets)*0.2/60:.1f} min)...")
-    
-    empty_count = 0
     for mkt in markets:
-        ticker = mkt.get("ticker", "")
+        ticker     = mkt.get("ticker", "")
         close_time = mkt.get("close_time", "")
 
-        # Convert the string constants to Unix integers
+        # determine which season window to use
         if close_time.startswith("2025"):
-            start = _iso_to_unix(KALSHI_START_2025)
-            end = _iso_to_unix(KALSHI_END_2025)
+            start, end = KALSHI_START_2025, KALSHI_END_2025
         elif close_time.startswith("2026"):
-            start = _iso_to_unix(KALSHI_START_2026)
-            end = _iso_to_unix(KALSHI_END_NOW)
+            start, end = KALSHI_START_2026, KALSHI_END_NOW
         else:
-            continue   
+            continue   # outside our window
 
+        print(f"    {ticker}", end=" ", flush=True)
         try:
             candles = _fetch_kalshi_candles(ticker, start_ts=start, end_ts=end)
         except requests.RequestException as exc:
+            print(f"[ERR: {exc}]")
             continue
 
-        if not candles:
-            empty_count += 1
-        else:
-            for c in candles:
-                c["market_ticker"] = ticker
-                c["series"] = KALSHI_SERIES
-            
-            all_candles.extend(candles)
-            # Only print when we actually capture data to avoid console spam
-            print(f"    ✓ {ticker} -> Captured {len(candles)} candles")
-            
+        for c in candles:
+            c["market_ticker"] = ticker
+            c["series"]        = KALSHI_SERIES
+
+        all_candles.extend(candles)
+        print(f"({len(candles)} candles)")
         time.sleep(0.2)
 
-    print(f"    Skipped {empty_count} markets with zero trades/volume.")
     output_path.write_text(json.dumps(all_candles, indent=2))
     print(f"  → {len(all_candles)} total candles saved to {output_path}")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STREAM 2 — THE ODDS API  (player props)
@@ -356,18 +369,15 @@ def fetch_pybaseball(output_dir: Path) -> None:
     Build and save H2H CSVs for 2025 and 2026 (YTD).
     """
     print("[fetch_all_data] Stream 3 — pybaseball H2H logs…")
+    
+    pybaseball.cache.enable()
+    pybaseball.cache.purge()
+
     current_year = 2026
 
     for season in [2025, current_year]:
         print(f"  Season {season}:")
         df = _build_h2h(season)
-        if df.empty:
-            print(f"    No data returned for {season}.")
-            continue
-        out_path = output_dir / f"h2h_{season}.csv"
-        df.to_csv(out_path, index=False)
-        print(f"  → {len(df)} rows saved to {out_path}")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT

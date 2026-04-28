@@ -58,6 +58,32 @@ team_stats.columns = ["GAME_ID", "OPP_TEAM",
 df = df.merge(team_stats, left_on=["GAME_ID", "OPP_TEAM"],
               right_on=["GAME_ID", "OPP_TEAM"], how="left")
 
+# ── 8. Playoff series context ─────────────────────────────────────
+# For each playoff game, compute how many games into the series it is
+# and how many wins/losses the team had BEFORE this game (shift(1) = no leakage).
+# Regular season games get 0 for all three columns.
+def add_series_context(grp):
+    grp = grp.sort_values("GAME_DATE").copy()
+    grp["SERIES_GAME_NUM"] = range(1, len(grp) + 1)
+    grp["SERIES_WINS"] = grp["WIN"].shift(1).cumsum().fillna(0).astype(int)
+    grp["SERIES_LOSSES"] = (1 - grp["WIN"]).shift(1).cumsum().fillna(0).astype(int)
+    return grp
+
+playoff_mask = df["IS_PLAYOFF"] == 1
+if playoff_mask.any():
+    playoff_ctx = df[playoff_mask].groupby(
+        ["SEASON", "TEAM_ABBREVIATION", "OPP_TEAM"], group_keys=False
+    ).apply(add_series_context)[["GAME_ID", "TEAM_ABBREVIATION", "SERIES_GAME_NUM", "SERIES_WINS", "SERIES_LOSSES"]]
+    df = df.merge(playoff_ctx, on=["GAME_ID", "TEAM_ABBREVIATION"], how="left")
+else:
+    df["SERIES_GAME_NUM"] = 0
+    df["SERIES_WINS"] = 0
+    df["SERIES_LOSSES"] = 0
+
+df["SERIES_GAME_NUM"] = df["SERIES_GAME_NUM"].fillna(0).astype(int)
+df["SERIES_WINS"] = df["SERIES_WINS"].fillna(0).astype(int)
+df["SERIES_LOSSES"] = df["SERIES_LOSSES"].fillna(0).astype(int)
+
 # ── Save ──────────────────────────────────────────────────────────
 feature_cols = [
     "GAME_ID",
@@ -65,6 +91,7 @@ feature_cols = [
     "TEAM_ABBREVIATION",
     "MATCHUP",
     "IS_HOME",
+    "IS_PLAYOFF",
     "REST_DAYS",
     "WIN",
     "WIN_PCT_L10",
@@ -79,6 +106,9 @@ feature_cols = [
     "OPP_DEF_RATING_L10",
     "OPP_PACE_PROXY_L10",
     "OPP_PM_TREND_L10",
+    "SERIES_GAME_NUM",
+    "SERIES_WINS",
+    "SERIES_LOSSES",
 ]
 df_out = df[feature_cols].dropna(subset=["WIN_PCT_L10"])
 df_out.to_csv("src/NBA/data/features.csv", index=False)
@@ -89,5 +119,5 @@ sample["GAME_DATE"] = sample["GAME_DATE"].astype(str)
 with open("src/NBA/data/sample_features.json", "w") as f:
     json.dump(sample.to_dict(orient="records"), f, indent=2)
 
-print(f"✅ Engineered features for {len(df_out)} games")
+print(f"Engineered features for {len(df_out)} games")
 print(df_out.head(3).to_string())

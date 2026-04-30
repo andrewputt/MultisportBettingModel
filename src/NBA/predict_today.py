@@ -14,42 +14,85 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import requests
-from nba_api.stats.endpoints import leaguegamelog, leaguedashplayerstats, playergamelog
+from nba_api.stats.endpoints import leaguegamelog, leaguedashplayerstats, playergamelog, boxscoretraditionalv3
 
 # ── Feature columns expected by the model ─────────────────────────────────────
 FEATURE_COLS = [
-    "IS_HOME", "IS_PLAYOFF", "REST_DAYS", "WIN_PCT_L10",
-    "OFF_RATING_L10", "DEF_RATING_L10", "PACE_PROXY_L10", "PM_TREND_L10",
-    "OPP_WIN_PCT_L10", "OPP_OFF_RATING_L10", "OPP_DEF_RATING_L10",
-    "OPP_PACE_PROXY_L10", "OPP_PM_TREND_L10",
-    "SERIES_GAME_NUM", "SERIES_WINS", "SERIES_LOSSES",
+    "IS_HOME",
+    "IS_PLAYOFF",
+    "REST_DAYS",
+    "WIN_PCT_L10",
+    "OFF_RATING_L10",
+    "DEF_RATING_L10",
+    "PACE_PROXY_L10",
+    "PM_TREND_L10",
+    "OPP_WIN_PCT_L10",
+    "OPP_OFF_RATING_L10",
+    "OPP_DEF_RATING_L10",
+    "OPP_PACE_PROXY_L10",
+    "OPP_PM_TREND_L10",
 ]
 
 # ── Abbreviation → display name ────────────────────────────────────────────────
 ABB_TO_NAME = {
-    "ATL": "Atlanta", "BKN": "Brooklyn", "BOS": "Boston", "CHA": "Charlotte",
-    "CHI": "Chicago", "CLE": "Cleveland", "DAL": "Dallas", "DEN": "Denver",
-    "DET": "Detroit", "GSW": "Golden State", "HOU": "Houston", "IND": "Indiana",
-    "LAC": "LA Clippers", "LAL": "LA Lakers", "MEM": "Memphis", "MIA": "Miami",
-    "MIL": "Milwaukee", "MIN": "Minnesota", "NOP": "New Orleans", "NYK": "New York",
-    "OKC": "Oklahoma City", "ORL": "Orlando", "PHI": "Philadelphia", "PHX": "Phoenix",
-    "POR": "Portland", "SAC": "Sacramento", "SAS": "San Antonio", "TOR": "Toronto",
-    "UTA": "Utah", "WAS": "Washington",
+    "ATL": "Atlanta",
+    "BKN": "Brooklyn",
+    "BOS": "Boston",
+    "CHA": "Charlotte",
+    "CHI": "Chicago",
+    "CLE": "Cleveland",
+    "DAL": "Dallas",
+    "DEN": "Denver",
+    "DET": "Detroit",
+    "GSW": "Golden State",
+    "HOU": "Houston",
+    "IND": "Indiana",
+    "LAC": "LA Clippers",
+    "LAL": "LA Lakers",
+    "MEM": "Memphis",
+    "MIA": "Miami",
+    "MIL": "Milwaukee",
+    "MIN": "Minnesota",
+    "NOP": "New Orleans",
+    "NYK": "New York",
+    "OKC": "Oklahoma City",
+    "ORL": "Orlando",
+    "PHI": "Philadelphia",
+    "PHX": "Phoenix",
+    "POR": "Portland",
+    "SAC": "Sacramento",
+    "SAS": "San Antonio",
+    "TOR": "Toronto",
+    "UTA": "Utah",
+    "WAS": "Washington",
 }
 
-# Penalty applied per missing star player (as a fraction of win probability)
-# e.g. 0.06 = lose 6 percentage points per missing star
-INJURY_PENALTY_PER_STAR = 0.06
+# Base injury penalty for a player averaging REFERENCE_STAR_PPG points.
+# Scales proportionally — a 30ppg player costs ~10%, a 12ppg player ~4%.
+BASE_INJURY_PENALTY = 0.06
+REFERENCE_STAR_PPG = 18.0
 
 
 # ── 1. Fetch current season game logs and compute rolling features ─────────────
 def get_current_season_features():
     print("Fetching current season (2025-26) game logs (regular + playoffs)...")
-    fields = ["GAME_ID", "GAME_DATE", "TEAM_ABBREVIATION", "MATCHUP",
-              "WL", "PTS", "FG_PCT", "REB", "AST", "PLUS_MINUS"]
+    fields = [
+        "GAME_ID",
+        "GAME_DATE",
+        "TEAM_ABBREVIATION",
+        "MATCHUP",
+        "WL",
+        "PTS",
+        "FG_PCT",
+        "REB",
+        "AST",
+        "PLUS_MINUS",
+    ]
     frames = []
     for season_type, label in [("Regular Season", 0), ("Playoffs", 1)]:
-        logs = leaguegamelog.LeagueGameLog(season="2025-26", season_type_all_star=season_type)
+        logs = leaguegamelog.LeagueGameLog(
+            season="2025-26", season_type_all_star=season_type
+        )
         part = logs.get_data_frames()[0][fields].copy()
         part["IS_PLAYOFF"] = label
         frames.append(part)
@@ -59,7 +102,9 @@ def get_current_season_features():
     df["WIN"] = df["WL"].map({"W": 1, "L": 0})
     df = df.dropna(subset=["PTS", "REB", "AST", "PLUS_MINUS"])
     df = df.sort_values(["TEAM_ABBREVIATION", "GAME_DATE"]).reset_index(drop=True)
-    df["REST_DAYS"] = df.groupby("TEAM_ABBREVIATION")["GAME_DATE"].diff().dt.days.fillna(0)
+    df["REST_DAYS"] = (
+        df.groupby("TEAM_ABBREVIATION")["GAME_DATE"].diff().dt.days.fillna(0)
+    )
     df["IS_HOME"] = df["MATCHUP"].apply(lambda x: 1 if "vs." in x else 0)
 
     def roll(col, window=10):
@@ -85,14 +130,19 @@ def get_current_season_features():
         .last()
         .reset_index()
     )
-    print(f"  Got stats for {len(latest)} teams (last game: {latest['GAME_DATE'].max().date()})")
+    print(
+        f"  Got stats for {len(latest)} teams (last game: {latest['GAME_DATE'].max().date()})"
+    )
 
     # Build series context for each (team, opponent) pair currently in playoffs.
     # Values represent totals from games already played — used as context for the next game.
     series_context = {}
+    playoffs_rest_advantage = {}
     playoff_games = df[df["IS_PLAYOFF"] == 1].copy()
     if not playoff_games.empty:
-        for (team, opp), grp in playoff_games.groupby(["TEAM_ABBREVIATION", "OPP_TEAM"]):
+        for (team, opp), grp in playoff_games.groupby(
+            ["TEAM_ABBREVIATION", "OPP_TEAM"]
+        ):
             grp = grp.sort_values("GAME_DATE")
             n_played = len(grp)
             n_wins = int(grp["WIN"].sum())
@@ -101,23 +151,28 @@ def get_current_season_features():
                 "SERIES_WINS": n_wins,
                 "SERIES_LOSSES": n_played - n_wins,
             }
-        print(f"  Computed series context for {len(series_context)} team-opponent pairs")
+        print(
+            f"  Computed series context for {len(series_context)} team-opponent pairs"
+        )
 
-    return latest, series_context
+    return latest, series_context, playoffs_rest_advantage
 
 
 # ── 2. Injury detection ────────────────────────────────────────────────────────
-def get_injury_report(team_abbs):
+def get_injury_report(team_abbs, team_stats):
     """
-    For each team, fetch the top 3 players by minutes played this season.
-    Then check their last 5 game logs. If a player has 0 games in the last
-    5 days while their team played, they are flagged as likely out.
+    For each team, check their most recent playoff game box score to see which
+    top-5 players (by season minutes) actually played. If a player is absent
+    from the box score or logged 0 minutes, they are flagged as out.
 
-    Returns: dict of {team_abb: [list of missing star names]}
+    Falls back to the 6-day threshold for teams whose last game box score
+    cannot be fetched.
+
+    Returns: dict of {team_abb: [{"name": str, "ppg": float}]}
     """
     print("Fetching player stats for injury detection...")
 
-    # Get all player stats for current season (both regular + playoffs)
+    # Get top 5 players per team by playoff minutes, including PPG for penalty scaling
     stats = leaguedashplayerstats.LeagueDashPlayerStats(
         season="2025-26",
         season_type_all_star="Playoffs",
@@ -125,45 +180,73 @@ def get_injury_report(team_abbs):
     ).get_data_frames()[0]
     time.sleep(1)
 
-    # Filter to teams we care about and get top 3 starters by minutes
     stars_by_team = {}
     for abb in team_abbs:
         team_players = stats[stats["TEAM_ABBREVIATION"] == abb].copy()
         if team_players.empty:
             stars_by_team[abb] = []
             continue
-        top = team_players.nlargest(3, "MIN")[["PLAYER_ID", "PLAYER_NAME", "MIN"]]
+        top = team_players.nlargest(5, "MIN")[["PLAYER_ID", "PLAYER_NAME", "MIN", "PTS"]]
         stars_by_team[abb] = top.to_dict("records")
 
-    # Check recent game logs for each star player
-    today = datetime.now(timezone.utc).date()
-    missing = {abb: [] for abb in team_abbs}
+    # Get the most recent game ID per team from the season game logs
+    recent_game_id = {}
+    if team_stats is not None and "GAME_ID" in team_stats.columns:
+        for abb in team_abbs:
+            row = team_stats[team_stats["TEAM_ABBREVIATION"] == abb]
+            if not row.empty and pd.notna(row.iloc[0]["GAME_ID"]):
+                recent_game_id[abb] = str(row.iloc[0]["GAME_ID"]).zfill(10)
 
-    all_players = [p for players in stars_by_team.values() for p in players]
-    for player in all_players:
-        pid = player["PLAYER_ID"]
-        name = player["PLAYER_NAME"]
-        abb = next(a for a, ps in stars_by_team.items() if any(p["PLAYER_ID"] == pid for p in ps))
-        try:
-            logs = playergamelog.PlayerGameLog(
-                player_id=pid, season="2025-26", season_type_all_star="Playoffs"
-            ).get_data_frames()[0]
-            time.sleep(0.6)
-            if logs.empty:
-                missing[abb].append(name)
-                continue
-            last_game = pd.to_datetime(logs["GAME_DATE"].iloc[0])
-            days_since = (pd.Timestamp(today) - last_game).days
-            # Flag as missing if they haven't played in 6+ days
-            # (accounts for typical playoff schedule gaps of 2-3 days)
-            if days_since >= 6:
-                missing[abb].append(name)
-        except Exception:
-            pass  # API hiccup — don't penalize
+    missing = {abb: [] for abb in team_abbs}
+    today = datetime.now(timezone.utc).date()
+
+    for abb in team_abbs:
+        players = stars_by_team.get(abb, [])
+        if not players:
+            continue
+
+        game_id = recent_game_id.get(abb)
+        if game_id:
+            # Primary: check box score of team's most recent game
+            try:
+                box = boxscoretraditionalv3.BoxScoreTraditionalV3(
+                    game_id=game_id
+                ).get_data_frames()[0]
+                time.sleep(0.6)
+                # Players who appeared in the box score with minutes played
+                played_ids = set(
+                    box.loc[box["minutes"].notna() & (box["minutes"] != "0:00"), "personId"]
+                )
+                for player in players:
+                    if player["PLAYER_ID"] not in played_ids:
+                        missing[abb].append({"name": player["PLAYER_NAME"], "ppg": player.get("PTS", REFERENCE_STAR_PPG)})
+                continue  # box score check succeeded, skip fallback
+            except Exception:
+                pass  # fall through to fallback below
+
+        # Fallback: check if player's last game log is 6+ days old
+        for player in players:
+            pid = player["PLAYER_ID"]
+            name = player["PLAYER_NAME"]
+            try:
+                logs = playergamelog.PlayerGameLog(
+                    player_id=pid, season="2025-26", season_type_all_star="Playoffs"
+                ).get_data_frames()[0]
+                time.sleep(0.6)
+                ppg = next((p.get("PTS", REFERENCE_STAR_PPG) for p in stars_by_team.get(abb, []) if p["PLAYER_ID"] == pid), REFERENCE_STAR_PPG)
+                if logs.empty:
+                    missing[abb].append({"name": name, "ppg": ppg})
+                    continue
+                last_game = pd.to_datetime(logs["GAME_DATE"].iloc[0])
+                if (pd.Timestamp(today) - last_game).days >= 6:
+                    missing[abb].append({"name": name, "ppg": ppg})
+            except Exception:
+                pass
 
     for abb in team_abbs:
         if missing[abb]:
-            print(f"  {abb} missing stars: {', '.join(missing[abb])}")
+            names = ", ".join(f"{p['name']} ({p['ppg']:.1f}ppg)" for p in missing[abb])
+            print(f"  {abb} missing stars: {names}")
         else:
             print(f"  {abb}: all stars active")
 
@@ -220,16 +303,18 @@ def parse_markets(markets):
 
         game_date = sides[0].get("expected_expiration_time", "")[:10]
 
-        parsed.append({
-            "event": event,
-            "game_date": game_date,
-            "away_abb": away_abb,
-            "home_abb": home_abb,
-            "away": ABB_TO_NAME[away_abb],
-            "home": ABB_TO_NAME[home_abb],
-            "away_implied": implied.get(away_abb),
-            "home_implied": implied.get(home_abb),
-        })
+        parsed.append(
+            {
+                "event": event,
+                "game_date": game_date,
+                "away_abb": away_abb,
+                "home_abb": home_abb,
+                "away": ABB_TO_NAME[away_abb],
+                "home": ABB_TO_NAME[home_abb],
+                "away_implied": implied.get(away_abb),
+                "home_implied": implied.get(home_abb),
+            }
+        )
 
     return parsed
 
@@ -266,21 +351,29 @@ def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats, series_context
     }
 
 
-def apply_injury_adjustment(prob, team_abb, missing_stars):
-    """Reduce win probability by INJURY_PENALTY_PER_STAR for each missing star."""
-    n_missing = len(missing_stars.get(team_abb, []))
-    adjusted = prob - (n_missing * INJURY_PENALTY_PER_STAR)
-    return round(max(0.01, min(0.99, adjusted)), 4)
+def compute_injury_penalty(missing_players):
+    """Sum scaled penalties for all missing players based on their PPG."""
+    total = 0.0
+    for p in missing_players:
+        ppg = p.get("ppg", REFERENCE_STAR_PPG)
+        total += BASE_INJURY_PENALTY * (ppg / REFERENCE_STAR_PPG)
+    return min(total, 0.25)
 
 
-def run_predictions(games, team_stats, model, missing_stars, series_context=None):
+def run_predictions(games, team_stats, model, missing_stars, series_context=None, playoffs_rest_advantage=None):
     results = []
     for game in games:
-        away_row = build_row(game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context)
-        home_row = build_row(game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context)
+        away_row = build_row(
+            game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context
+        )
+        home_row = build_row(
+            game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context
+        )
 
         if away_row is None or home_row is None:
-            print(f"  [WARN] Missing stats for {game['away_abb']} or {game['home_abb']} — skipping")
+            print(
+                f"  [WARN] Missing stats for {game['away_abb']} or {game['home_abb']} — skipping"
+            )
             continue
 
         df_input = pd.DataFrame([away_row, home_row])[FEATURE_COLS]
@@ -289,8 +382,19 @@ def run_predictions(games, team_stats, model, missing_stars, series_context=None
         away_base = round(float(probs[0]), 4)
         home_base = round(float(probs[1]), 4)
 
-        away_adj = apply_injury_adjustment(away_base, game["away_abb"], missing_stars)
-        home_adj = apply_injury_adjustment(home_base, game["home_abb"], missing_stars)
+        away_penalty = compute_injury_penalty(missing_stars.get(game["away_abb"], []))
+        home_penalty = compute_injury_penalty(missing_stars.get(game["home_abb"], []))
+
+        # Injured team loses probability; opponent gains the same amount (zero-sum transfer)
+        away_adj = away_base - away_penalty + home_penalty
+        home_adj = home_base - home_penalty + away_penalty
+
+        if playoffs_rest_advantage:
+            away_adj += playoffs_rest_advantage.get(game["away_abb"], 0.0)
+            home_adj += playoffs_rest_advantage.get(game["home_abb"], 0.0)
+
+        away_adj = round(max(0.01, min(0.99, away_adj)), 4)
+        home_adj = round(max(0.01, min(0.99, home_adj)), 4)
 
         away_implied = game["away_implied"]
         home_implied = game["home_implied"]
@@ -302,25 +406,28 @@ def run_predictions(games, team_stats, model, missing_stars, series_context=None
         ]:
             n_missing = len(missing_stars.get(abb, []))
             edge = round(adj_prob - implied, 4) if implied is not None else None
-            # Kelly fraction = edge / (1 - implied_prob). Capped at 25% of bankroll.
+            # Half Kelly: conservative sizing that accounts for model uncertainty.
+            # Capped at 25% of bankroll.
             if edge is not None and edge > 0 and implied is not None and implied < 1:
-                kelly = round(edge / (1 - implied), 4)
+                kelly = round((edge / (1 - implied)) * 0.5, 4)
                 kelly = min(kelly, 0.25)
             else:
                 kelly = None
-            results.append({
-                "GAME_DATE": game["game_date"],
-                "MATCHUP": matchup,
-                "TEAM": name,
-                "ABB": abb,
-                "IS_HOME": is_home,
-                "MODEL_PROB": base_prob,
-                "INJ_ADJUSTED_PROB": adj_prob,
-                "STARS_OUT": n_missing,
-                "KALSHI_IMPLIED": implied,
-                "EDGE": edge,
-                "KELLY_FRACTION": kelly,
-            })
+            results.append(
+                {
+                    "GAME_DATE": game["game_date"],
+                    "MATCHUP": matchup,
+                    "TEAM": name,
+                    "ABB": abb,
+                    "IS_HOME": is_home,
+                    "MODEL_PROB": base_prob,
+                    "INJ_ADJUSTED_PROB": adj_prob,
+                    "STARS_OUT": n_missing,
+                    "KALSHI_IMPLIED": implied,
+                    "EDGE": edge,
+                    "KELLY_FRACTION": kelly,
+                }
+            )
 
     return pd.DataFrame(results)
 
@@ -330,16 +437,18 @@ if __name__ == "__main__":
     with open("src/NBA/models/nba_model.pkl", "rb") as f:
         model = pickle.load(f)
 
-    team_stats, series_context = get_current_season_features()
+    team_stats, series_context, playoffs_rest_advantage = get_current_season_features()
     markets = fetch_kalshi_markets()
     games = parse_markets(markets)
     print(f"Parsed {len(games)} unique games from Kalshi")
 
     # Get all unique team abbreviations across today's games
     all_teams = list({abb for g in games for abb in [g["away_abb"], g["home_abb"]]})
-    missing_stars = get_injury_report(all_teams)
+    missing_stars = get_injury_report(all_teams, team_stats)
 
-    df = run_predictions(games, team_stats, model, missing_stars, series_context)
+    df = run_predictions(
+        games, team_stats, model, missing_stars, series_context, playoffs_rest_advantage
+    )
 
     if df.empty:
         print("No predictions generated.")
@@ -355,8 +464,20 @@ if __name__ == "__main__":
         edges = df[df["EDGE"].notna() & (df["EDGE"] >= 0.05)]
         if not edges.empty:
             print("\n--- EDGES >= 5% (potential value bets) ---")
-            print(edges[["GAME_DATE", "MATCHUP", "TEAM", "INJ_ADJUSTED_PROB",
-                          "STARS_OUT", "KALSHI_IMPLIED", "EDGE", "KELLY_FRACTION"]].to_string(index=False))
+            print(
+                edges[
+                    [
+                        "GAME_DATE",
+                        "MATCHUP",
+                        "TEAM",
+                        "INJ_ADJUSTED_PROB",
+                        "STARS_OUT",
+                        "KALSHI_IMPLIED",
+                        "EDGE",
+                        "KELLY_FRACTION",
+                    ]
+                ].to_string(index=False)
+            )
         else:
             print("\nNo edges >= 5% found.")
 

@@ -18,3 +18,11 @@ kalshi_key.pem
 
 # DS_Store
 .DS_Store
+
+# Claude Code
+.claude/
+
+# NBA daily ephemeral files
+BETTING_WORKFLOW.md
+src/NBA/data/predictions_today.csv
+src/NBA/data/predictions_run_*.log

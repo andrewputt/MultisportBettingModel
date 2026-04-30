@@ -334,6 +334,17 @@ def load_odds(path: Path) -> pd.DataFrame:
     # ── keep Over side only (model targets the over probability) ──────────────
     df = df[df["side"].str.lower() == "over"].copy()
     df.rename(columns={"vig_free_prob": "no_vig_over_prob"}, inplace=True)
+
+    # ── deduplicate multiple bookmakers for the same prop ─────────────────────
+    df = df.groupby(
+        ["event_id", "home_team", "away_team", "commence_time", "market", "player", "side", "line"],
+        dropna=False,
+        as_index=False
+    ).agg({
+        "no_vig_over_prob": "mean",
+        "raw_prob": "mean"
+    })
+
     return df
 
 
@@ -506,8 +517,10 @@ def engineer_features(
 
         if "strikeout" in market or "_k" in market:
             # pitcher K rate vs. market line
+            # avg_so is total team Ks per game (~8.2). A starter typically gets ~60% of those.
+            starter_avg_so = avg_so * 0.6
             k_line = line if line else 5.0
-            bvp    = (avg_so - k_line) / (avg_so + k_line + 1e-6) * 0.05
+            bvp    = (starter_avg_so - k_line) / (starter_avg_so + k_line + 1e-6) * 0.05
 
         elif "hits" in market:
             # lower RA → hitting against a better staff → slightly fewer hits
@@ -621,14 +634,7 @@ def print_top5_edges(df: pd.DataFrame, target_date: str) -> None:
 
     top = df[df["edge"] >= EV_THRESHOLD].nlargest(5, "edge")
     if top.empty:
-        # 1. Sort by highest edge to ensure the best odds are at the top
-        df = df.sort_values(by="edge", ascending=False)
-    
-        # 2. Drop all duplicate player names, keeping only their first (best) row.
-        df = df.drop_duplicates(subset=["player"], keep="first")
-
-        # 3. Now grab the true Top 5 unique plays.
-        top = df.head(5)
+        top = df.nlargest(5, "edge")   # show best even if below threshold
 
     W = 76
     line_char = "─"
@@ -843,5 +849,24 @@ if __name__ == "__main__":
         default=date.today().isoformat(),
         help="Model date (YYYY-MM-DD).  Aligns with weather data.  Defaults to today.",
     )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Skip auto-generating the HTML dashboard after the model run.",
+    )
     args = parser.parse_args()
     run(args.date)
+
+    # ── Auto-generate dashboard unless explicitly skipped ─────────────────────
+    if not args.no_dashboard:
+        try:
+            import importlib.util, sys as _sys
+            _spec = importlib.util.spec_from_file_location(
+                "generate_dashboard",
+                Path(__file__).resolve().parent / "generate_dashboard.py",
+            )
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _mod.main()
+        except Exception as _e:
+            print(f"  [process_model] Dashboard generation skipped: {_e}")

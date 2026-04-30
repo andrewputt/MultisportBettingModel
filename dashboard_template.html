@@ -1,0 +1,1477 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <title>EdgeModel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Inter", "ui-sans-serif", "system-ui"] },
+            colors: {
+              surface: {
+                base: "#f7f8fa",
+                card: "#ffffff",
+                sub: "#f1f3f7",
+                line: "#e7eaf0",
+                muted: "#9aa3b2",
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      html,
+      body {
+        background: #f7f8fa;
+        color: #0f172a;
+      }
+      body {
+        font-feature-settings: "ss01" 1, "cv11" 1;
+      }
+      .num {
+        font-variant-numeric: tabular-nums;
+      }
+      @keyframes pulse-dot {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.5;
+          transform: scale(0.85);
+        }
+      }
+      .live-dot {
+        animation: pulse-dot 1.6s ease-in-out infinite;
+      }
+      @keyframes hot-glow {
+        0%,
+        100% {
+          box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.55),
+            0 8px 28px -8px rgba(16, 185, 129, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.85),
+            0 14px 36px -8px rgba(16, 185, 129, 0.55);
+        }
+      }
+      .hot-glow {
+        animation: hot-glow 2.6s ease-in-out infinite;
+      }
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #d6dae3;
+        border-radius: 8px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #b9bfcc;
+      }
+    </style>
+    <script
+      src="https://unpkg.com/react@18.3.1/umd/react.development.js"
+      crossorigin
+    ></script>
+    <script
+      src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"
+      crossorigin
+    ></script>
+    <script
+      src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"
+      crossorigin
+    ></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  </head>
+  <body class="font-sans antialiased">
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useState, useEffect, useMemo, useRef } = React;
+
+      /* ═══════════════════════════════════════════════════════════════════
+   INJECTED DATA — replaced by generate_dashboard.py on each run.
+   The values between the markers are sample/fallback data used when
+   the file is opened directly without running the pipeline.
+═══════════════════════════════════════════════════════════════════ */
+
+      // Real MLB rows from golden.csv (generate_dashboard.py replaces this)
+      const MLB_RAW =
+        /*INJECT_ROWS_START*/
+        [
+          {
+            player: "Jeffrey Springs",
+            market: "Pitcher Ks",
+            marketRaw: "pitcher_strikeouts",
+            line: "3.5",
+            mktProb: 58.3,
+            modelProb: 60.4,
+            edge: 2.0,
+            homeTeam: "Athl",
+            awayTeam: "",
+            commence: "",
+            wind: "CALM",
+            windSpd: "3",
+            isoHome: 0.155,
+            isoAway: 0.148,
+            bookmaker: "DraftKings",
+          },
+          {
+            player: "Miles Mikolas",
+            market: "Pitcher Ks",
+            marketRaw: "pitcher_strikeouts",
+            line: "3.5",
+            mktProb: 43.7,
+            modelProb: 45.5,
+            edge: 1.8,
+            homeTeam: "NYM",
+            awayTeam: "",
+            commence: "",
+            wind: "",
+            windSpd: "",
+            isoHome: 0.171,
+            isoAway: 0.168,
+            bookmaker: "FanDuel",
+          },
+          {
+            player: "Bailey Ober",
+            market: "Pitcher Ks",
+            marketRaw: "pitcher_strikeouts",
+            line: "3.5",
+            mktProb: 57.7,
+            modelProb: 59.5,
+            edge: 1.8,
+            homeTeam: "MIN",
+            awayTeam: "",
+            commence: "",
+            wind: "OUT",
+            windSpd: "8",
+            isoHome: 0.18,
+            isoAway: 0.175,
+            bookmaker: "BetMGM",
+          },
+          {
+            player: "Brandon Young",
+            market: "Pitcher Ks",
+            marketRaw: "pitcher_strikeouts",
+            line: "3.5",
+            mktProb: 55.5,
+            modelProb: 57.3,
+            edge: 1.8,
+            homeTeam: "BAL",
+            awayTeam: "",
+            commence: "",
+            wind: "IN",
+            windSpd: "6",
+            isoHome: 0.162,
+            isoAway: 0.159,
+            bookmaker: "Caesars",
+          },
+          {
+            player: "Noah Cameron",
+            market: "Pitcher Ks",
+            marketRaw: "pitcher_strikeouts",
+            line: "4.5",
+            mktProb: 50.0,
+            modelProb: 51.5,
+            edge: 1.5,
+            homeTeam: "Athl",
+            awayTeam: "",
+            commence: "",
+            wind: "CALM",
+            windSpd: "2",
+            isoHome: 0.155,
+            isoAway: 0.148,
+            bookmaker: "DraftKings",
+          },
+        ];
+      /*INJECT_ROWS_END*/ // Meta / system health (generate_dashboard.py replaces this)
+      const INJECTED_META =
+        /*INJECT_META_START*/
+        {
+          date: "2026-04-30",
+          scanned: 566,
+          plays: 0,
+          avgEdge: 1.8,
+          signalStrength: 62,
+          regime_2025: 75,
+          regime_2026: 25,
+          pivotDate: "May 15 2026",
+          threshold: 8.0,
+          ingestion: [
+            { name: "Odds API", status: "live", latency: 110 },
+            { name: "Kalshi Markets", status: "live", latency: 64 },
+            { name: "pybaseball / B-Ref", status: "live", latency: 0 },
+            { name: "Open-Meteo Wx", status: "cached", latency: 14400 },
+          ],
+        };
+      /*INJECT_META_END*/ /* ═══════════════════════════════════════════════════════════════════
+   NBA / EPL — pipelines not yet built
+   ────────────────────────────────────────────────────────────────────
+   TODO (NBA groupmate):
+     Replace NBA_EDGES with rows from your NBA pipeline.
+     Required fields per row:
+       id, player, team, opp, gameTime, market, line, side (OVER/UNDER),
+       book (market % 0-100), model (model % 0-100),
+       fatigue: { b2b: bool, restDays: int, label: string },
+       steam:   { moved: bool, dir: 'UP'|'DOWN', label: string }
+     Then update LEAGUES.NBA below: set markets[], sources[], primaryFeed.
+   ────────────────────────────────────────────────────────────────────
+   TODO (EPL groupmate):
+     Replace EPL_EDGES with rows from your EPL pipeline.
+     Required fields per row:
+       id, player, team, opp, gameTime, market, line, side,
+       book, model,
+       xgForm:    number|null  (expected goals form, e.g. 0.72),
+       cleanSheet: number|null (clean sheet probability 0-1, goalkeepers only)
+     Then update LEAGUES.EPL below: set markets[], sources[], primaryFeed.
+═══════════════════════════════════════════════════════════════════ */
+
+      // ── NBA: replace this empty array with your pipeline output ──────
+      const NBA_EDGES = [];
+
+      // ── EPL: replace this empty array with your pipeline output ──────
+      const EPL_EDGES = [];
+
+      /* ═══════════════════════════════════════════════════════════════════
+   TRANSFORM — convert generate_dashboard.py format → design format
+═══════════════════════════════════════════════════════════════════ */
+      function formatGameTime(ts) {
+        if (!ts) return "TBD";
+        try {
+          const dt = new Date(ts);
+          if (isNaN(dt)) return ts;
+          return (
+            dt.toLocaleTimeString("en-US", {
+              timeZone: "America/New_York",
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            }) + " ET"
+          );
+        } catch (e) {
+          return ts;
+        }
+      }
+
+      function transformMLBRow(r, i) {
+        const windCat = r.wind || "CALM";
+        const windMph = parseInt(r.windSpd || 0, 10);
+        const windLabel =
+          windCat === "CALM" || !r.wind ? "CALM" : `${windCat} ${windMph}mph`;
+        const iso = ((r.isoHome || 0) + (r.isoAway || 0)) / 2;
+        const opp = r.awayTeam ? `vs ${r.awayTeam}` : "";
+        return {
+          id: `mlb-${i + 1}`,
+          player: r.player || "—",
+          team: r.homeTeam || "—",
+          opp,
+          gameTime: formatGameTime(r.commence),
+          market: r.market || "—",
+          marketRaw: r.marketRaw || "",
+          line: parseFloat(r.line) || 0,
+          side: r.side || "OVER",
+          book: +(r.mktProb || 0),
+          model: +(r.modelProb || 0),
+          edge: +(r.edge || 0), // pass through pre-computed edge from process_model
+          conditions: { wind: windCat, mph: windMph, label: windLabel },
+          iso: +iso.toFixed(3),
+          pf: 1.0,
+        };
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+   GRADE + DECORATE
+═══════════════════════════════════════════════════════════════════ */
+      function gradeFor(edge) {
+        if (edge >= 10) return { letter: "A+", tone: "edge" };
+        if (edge >= 8) return { letter: "A", tone: "edge" };
+        if (edge >= 6) return { letter: "B", tone: "good" };
+        if (edge >= 4) return { letter: "C", tone: "mid" };
+        if (edge >= 2) return { letter: "D", tone: "weak" };
+        return { letter: "F", tone: "bad" };
+      }
+
+      function decorate(rows) {
+        return rows
+          .map((r) => {
+            // Prefer the pre-computed edge from process_model.py (already calibrated).
+            // Fall back to model - book only for mock NBA/EPL rows that have no .edge.
+            const edge =
+              r.edge != null && r.edge !== 0
+                ? +r.edge.toFixed(1)
+                : +(r.model - r.book).toFixed(1);
+            return { ...r, edge, grade: gradeFor(edge) };
+          })
+          .sort((a, b) => b.edge - a.edge)
+          .map((r, i) => ({ ...r, rank: i + 1 }));
+      }
+
+      /* ═══════════════════════════════════════════════════════════════════
+   BUILD LEAGUES
+═══════════════════════════════════════════════════════════════════ */
+      const MLB_EDGES_RAW = MLB_RAW.map(transformMLBRow);
+      const MLB_ROWS = decorate(MLB_EDGES_RAW);
+
+      // Dynamic market list — Top 5 is default; only show market tabs that have data
+      const MLB_MARKET_ORDER = [
+        "Top 5",
+        "All Markets",
+        "Pitcher Ks",
+        "Hits",
+        "Total Bases",
+        "Pitcher Outs",
+      ];
+      const MLB_MARKET_SET = new Set(MLB_ROWS.map((r) => r.market));
+      const MLB_MARKETS = MLB_MARKET_ORDER.filter(
+        (m) => m === "Top 5" || m === "All Markets" || MLB_MARKET_SET.has(m)
+      );
+
+      const SYSTEM_HEALTH = {
+        regime: {
+          y2025: INJECTED_META.regime_2025 || 75,
+          y2026: INJECTED_META.regime_2026 || 25,
+        },
+        pivotDate: INJECTED_META.pivotDate || "May 15 2026",
+        threshold: INJECTED_META.threshold || 8.0,
+        signalStrength: INJECTED_META.signalStrength || 62,
+        ingestion: INJECTED_META.ingestion || [
+          { name: "Odds API", status: "live", latency: 110 },
+          { name: "Kalshi Markets", status: "live", latency: 64 },
+          { name: "pybaseball / B-Ref", status: "live", latency: 0 },
+          { name: "Open-Meteo Wx", status: "cached", latency: 14400 },
+        ],
+      };
+
+      const LEAGUES = {
+        MLB: {
+          code: "MLB",
+          name: "Major League Baseball",
+          metaLabel: `Player Props · ${INJECTED_META.date || "—"}`,
+          markets: MLB_MARKETS,
+          rows: MLB_ROWS,
+          contextHeader: "Conditions · ISO",
+          sources: ["Kalshi", "Odds API", "pybaseball", "Open-Meteo"],
+          primaryFeed: "Odds API",
+          scanned: INJECTED_META.scanned || MLB_ROWS.length,
+        },
+        NBA: {
+          code: "NBA",
+          name: "National Basketball Association",
+          metaLabel: "Player Props · 2026-04-30",
+          markets: ["All Markets", "Points", "Rebounds", "Assists", "Threes"],
+          rows: decorate(NBA_EDGES),
+          contextHeader: "Fatigue · Steam",
+          sources: ["NBA Stats API", "Kalshi", "Odds API", "pbpstats"],
+          primaryFeed: "NBA Stats API",
+          scanned: 924,
+        },
+        EPL: {
+          code: "EPL",
+          name: "English Premier League",
+          metaLabel: "Player Props · Matchday 35",
+          markets: [
+            "All Markets",
+            "Shots",
+            "Shots on Tgt",
+            "Assists",
+            "Clean Sheet",
+            "Saves",
+          ],
+          rows: decorate(EPL_EDGES),
+          contextHeader: "xG Form · CS Prob",
+          sources: ["Opta Feed", "Kalshi", "Odds API", "fbref"],
+          primaryFeed: "Opta Feed",
+          scanned: 612,
+        },
+      };
+
+      /* ═══════════════════════════════════════════════════════════════════
+   COMPONENTS
+═══════════════════════════════════════════════════════════════════ */
+
+      // ── Lucide icon wrapper ──────────────────────────────────────────
+      const Icon = ({ name, size = 16, className = "", strokeWidth = 2 }) => {
+        const ref = useRef(null);
+        useEffect(() => {
+          if (ref.current && window.lucide) {
+            ref.current.innerHTML = "";
+            const el = document.createElement("i");
+            el.setAttribute("data-lucide", name);
+            ref.current.appendChild(el);
+            window.lucide.createIcons({
+              attrs: { "stroke-width": strokeWidth, width: size, height: size },
+            });
+          }
+        }, [name, size, strokeWidth]);
+        return (
+          <span
+            ref={ref}
+            className={`inline-flex items-center justify-center ${className}`}
+            style={{ width: size, height: size }}
+          />
+        );
+      };
+
+      // ── Pill ─────────────────────────────────────────────────────────
+      const Pill = ({
+        children,
+        tone = "neutral",
+        className = "",
+        size = "sm",
+      }) => {
+        const tones = {
+          neutral: "bg-slate-100 text-slate-700 border-slate-200",
+          soft: "bg-slate-50 text-slate-600 border-slate-200",
+          edge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+          edgeStrong: "bg-emerald-500 text-white border-emerald-500",
+          info: "bg-sky-50 text-sky-700 border-sky-200",
+          warn: "bg-amber-50 text-amber-700 border-amber-200",
+          bad: "bg-rose-50 text-rose-700 border-rose-200",
+          indigo: "bg-indigo-50 text-indigo-700 border-indigo-200",
+        };
+        const sizes = {
+          xs: "px-1.5 py-0.5 text-[10px]",
+          sm: "px-2 py-0.5 text-[11px]",
+          md: "px-2.5 py-1 text-[12px]",
+        };
+        return (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full font-medium border ${
+              tones[tone] || tones.neutral
+            } ${sizes[size]} ${className}`}
+          >
+            {children}
+          </span>
+        );
+      };
+
+      // ── Card ─────────────────────────────────────────────────────────
+      const Card = ({ children, className = "", glow = false }) => (
+        <div
+          className={`bg-white rounded-2xl border border-slate-200 ${
+            glow ? "hot-glow" : "shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+          } ${className}`}
+        >
+          {children}
+        </div>
+      );
+
+      // ── League icon ───────────────────────────────────────────────────
+      const LeagueIcon = ({ league, className = "" }) => {
+        const colors = {
+          MLB: "bg-rose-500",
+          NBA: "bg-orange-500",
+          EPL: "bg-indigo-500",
+        };
+        const labels = { MLB: "⚾", NBA: "🏀", EPL: "⚽" };
+        return (
+          <span
+            className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${colors[league]} text-white text-[12px] ${className}`}
+          >
+            {labels[league]}
+          </span>
+        );
+      };
+
+      // ── League toggle ─────────────────────────────────────────────────
+      const LeagueToggle = ({ value, onChange, leagues }) => (
+        <div className="inline-flex items-center bg-slate-100 rounded-full p-1 gap-0.5">
+          {leagues.map((l) => {
+            const active = value === l;
+            return (
+              <button
+                key={l}
+                onClick={() => onChange(l)}
+                className={`relative inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-[13px] font-semibold transition-all
+            ${
+              active
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-800"
+            }`}
+              >
+                <LeagueIcon league={l} className="!w-4 !h-4 !text-[10px]" />
+                <span>{l}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
+
+      // ── Clock ─────────────────────────────────────────────────────────
+      const Clock = () => {
+        const [t, setT] = useState(() => new Date());
+        useEffect(() => {
+          const id = setInterval(() => setT(new Date()), 1000);
+          return () => clearInterval(id);
+        }, []);
+        const hh = String(t.getHours()).padStart(2, "0");
+        const mm = String(t.getMinutes()).padStart(2, "0");
+        return (
+          <span className="text-slate-500 text-[13px] tabular-nums">
+            {hh}:{mm}
+          </span>
+        );
+      };
+
+      // ── Header ────────────────────────────────────────────────────────
+      const Header = ({ league, setLeague, leagues }) => (
+        <header className="bg-white/80 backdrop-blur sticky top-0 z-30 border-b border-slate-200">
+          <div className="px-6 h-16 flex items-center justify-between max-w-[1440px] mx-auto">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-sm">
+                  <span className="text-white text-[15px] font-bold">E</span>
+                </div>
+                <div className="leading-tight">
+                  <div className="text-[15px] font-bold tracking-tight text-slate-900">
+                    EdgeModel
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Today's best plays
+                  </div>
+                </div>
+              </div>
+              <nav className="hidden md:flex items-center gap-1 text-[13px] font-medium">
+                <a className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg cursor-pointer bg-slate-900 text-white">
+                  <Icon name="flame" size={14} /> Today
+                </a>
+              </nav>
+            </div>
+            <div className="flex items-center gap-3">
+              <LeagueToggle
+                value={league}
+                onChange={setLeague}
+                leagues={leagues}
+              />
+              <div className="w-px h-6 bg-slate-200 mx-1" />
+              <div className="hidden sm:flex items-center gap-2 px-3 h-9 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 live-dot" />
+                <span className="text-[12px] font-semibold">Live</span>
+                <Clock />
+              </div>
+              <button className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600">
+                <Icon name="bell" size={16} />
+              </button>
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-fuchsia-500 flex items-center justify-center text-white text-[12px] font-bold ring-2 ring-white">
+                AM
+              </div>
+            </div>
+          </div>
+        </header>
+      );
+
+      // ── Hero ──────────────────────────────────────────────────────────
+      const HeroStat = ({ label, value, sub, tone = "default" }) => (
+        <div
+          className={`rounded-2xl p-4 backdrop-blur border
+    ${
+      tone === "edge"
+        ? "bg-emerald-400/10 border-emerald-300/20"
+        : "bg-white/5 border-white/10"
+    }`}
+        >
+          <div className="text-[11px] uppercase tracking-wider text-slate-300/80">
+            {label}
+          </div>
+          <div
+            className={`mt-1 text-[26px] font-bold leading-none ${
+              tone === "edge" ? "text-emerald-300" : "text-white"
+            }`}
+          >
+            {value}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">{sub}</div>
+        </div>
+      );
+
+      const Hero = ({ league, leagueData, threshold }) => {
+        const hot = leagueData.rows.filter((r) => r.edge >= threshold).length;
+        const top = leagueData.rows[0];
+        const scanned = leagueData.scanned || leagueData.rows.length;
+        const conf = league === "MLB" ? INJECTED_META.signalStrength || 62 : 81;
+        return (
+          <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-900/40 text-white p-6 md:p-7 relative overflow-hidden">
+            <div className="absolute -top-20 -right-12 w-72 h-72 rounded-full bg-emerald-500/15 blur-3xl" />
+            <div className="absolute -bottom-24 left-1/3 w-72 h-72 rounded-full bg-indigo-500/10 blur-3xl" />
+            <div className="relative grid grid-cols-12 gap-6 items-end">
+              <div className="col-span-12 md:col-span-7">
+                <div className="flex items-center gap-2 mb-4">
+                  <Pill
+                    tone="edgeStrong"
+                    size="sm"
+                    className="!bg-emerald-500/20 !text-emerald-200 !border-emerald-400/30 whitespace-nowrap"
+                  >
+                    <Icon name="sparkles" size={11} /> {league} · 2026 Season
+                  </Pill>
+                </div>
+                <h1 className="text-[32px] md:text-[40px] font-bold leading-[1.05] tracking-tight">
+                  Good morning, Andrew.
+                  <span className="block text-emerald-300/90 font-semibold text-[22px] md:text-[26px] mt-1">
+                    {hot
+                      ? `${hot} ${
+                          hot === 1 ? "play is" : "plays are"
+                        } above your ${threshold}% edge today.`
+                      : `No plays cleared your ${threshold}% edge today.`}
+                  </span>
+                </h1>
+                {top && (
+                  <p className="mt-3 text-slate-300 text-[14px] max-w-xl">
+                    Top edge:{" "}
+                    <span className="text-white font-semibold">
+                      {top.player}
+                    </span>{" "}
+                    {top.side} {top.line.toFixed(1)} {top.market}
+                    <span className="text-emerald-300 font-semibold">
+                      {" "}
+                      · +{top.edge.toFixed(1)}% edge.
+                    </span>{" "}
+                    Tap a play below for the full breakdown.
+                  </p>
+                )}
+              </div>
+              <div className="col-span-12 md:col-span-5 grid grid-cols-3 gap-3">
+                <HeroStat
+                  label="Scanned"
+                  value={scanned.toLocaleString()}
+                  sub="props today"
+                />
+                <HeroStat
+                  label="Surfaced"
+                  value={leagueData.rows.length}
+                  sub="unique-matchup"
+                />
+                <HeroStat
+                  label="Confidence"
+                  value={`${conf}%`}
+                  sub="signal strength"
+                  tone="edge"
+                />
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // ── Market filter chips ───────────────────────────────────────────
+      const MarketChips = ({ markets, value, onChange, counts }) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          {markets.map((m) => {
+            const active = value === m;
+            const count = counts[m] ?? 0;
+            return (
+              <button
+                key={m}
+                onClick={() => onChange(m)}
+                className={`inline-flex items-center gap-2 h-9 px-3.5 rounded-full text-[13px] font-medium border transition-all whitespace-nowrap
+            ${
+              active
+                ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:text-slate-900"
+            }`}
+              >
+                <span>{m}</span>
+                <span
+                  className={`text-[11px] rounded-full px-1.5 py-0.5 ${
+                    active
+                      ? "bg-white/15 text-white/90"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      );
+
+      // ── Edge bar ──────────────────────────────────────────────────────
+      const EdgeBar = ({ edge, threshold = 8 }) => {
+        const max = 15;
+        const w = Math.max(0, Math.min(1, edge / max));
+        const tone =
+          edge >= threshold
+            ? "bg-emerald-500"
+            : edge >= 4
+            ? "bg-emerald-400"
+            : "bg-slate-300";
+        return (
+          <div className="w-28 h-1.5 bg-slate-100 rounded-full relative overflow-hidden">
+            <div
+              className={`absolute inset-y-0 left-0 ${tone} rounded-full`}
+              style={{ width: `${w * 100}%` }}
+            />
+            <div
+              className="absolute inset-y-0"
+              style={{ left: `${(threshold / max) * 100}%` }}
+            >
+              <div className="w-px h-full bg-slate-400/60" />
+            </div>
+          </div>
+        );
+      };
+
+      // ── Grade chip ────────────────────────────────────────────────────
+      const Grade = ({ g }) => {
+        const map = {
+          edge: "bg-emerald-500 text-white",
+          good: "bg-emerald-100 text-emerald-700",
+          mid: "bg-slate-100 text-slate-700",
+          weak: "bg-slate-100 text-slate-500",
+          bad: "bg-rose-100 text-rose-700",
+        };
+        return (
+          <span
+            className={`inline-flex items-center justify-center w-9 h-9 rounded-xl font-bold text-[14px] ${
+              map[g.tone] || map.mid
+            }`}
+          >
+            {g.letter}
+          </span>
+        );
+      };
+
+      // ── Player avatar ─────────────────────────────────────────────────
+      const Avatar = ({ name, league }) => {
+        const initials = name
+          .split(" ")
+          .map((s) => s[0])
+          .slice(0, 2)
+          .join("")
+          .toUpperCase();
+        const palettes = [
+          ["#fb7185", "#e11d48"],
+          ["#fbbf24", "#f97316"],
+          ["#34d399", "#0d9488"],
+          ["#38bdf8", "#6366f1"],
+          ["#e879f9", "#9333ea"],
+          ["#a3e635", "#10b981"],
+        ];
+        const idx =
+          (name.charCodeAt(0) + name.charCodeAt(name.length - 1)) %
+          palettes.length;
+        const [a, b] = palettes[idx];
+        return (
+          <div className="relative">
+            <div
+              className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold text-[13px] shadow-sm"
+              style={{ backgroundImage: `linear-gradient(135deg, ${a}, ${b})` }}
+            >
+              {initials}
+            </div>
+            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white flex items-center justify-center text-[10px] ring-2 ring-white">
+              <LeagueIcon league={league} className="!w-4 !h-4 !text-[9px]" />
+            </div>
+          </div>
+        );
+      };
+
+      // ── League-specific context badges ────────────────────────────────
+      const MlbContext = ({ row }) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Pill
+            tone={
+              row.conditions.wind === "OUT"
+                ? "edge"
+                : row.conditions.wind === "IN"
+                ? "bad"
+                : "info"
+            }
+          >
+            {row.conditions.wind === "OUT" && <span>↑</span>}
+            {row.conditions.wind === "IN" && <span>↓</span>}
+            {row.conditions.wind === "CALM" && <Icon name="wind" size={10} />}
+            {row.conditions.label}
+          </Pill>
+          <Pill tone="indigo">ISO {row.iso.toFixed(3)}</Pill>
+        </div>
+      );
+
+      const NbaContext = ({ row }) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Pill
+            tone={
+              row.fatigue.b2b
+                ? "warn"
+                : row.fatigue.restDays >= 2
+                ? "edge"
+                : "info"
+            }
+          >
+            {row.fatigue.label}
+          </Pill>
+          {row.steam.moved ? (
+            <Pill tone={row.steam.dir === "UP" ? "edge" : "bad"}>
+              <Icon
+                name={row.steam.dir === "UP" ? "trending-up" : "trending-down"}
+                size={10}
+              />
+              Steam
+            </Pill>
+          ) : (
+            <Pill tone="soft">Flat</Pill>
+          )}
+        </div>
+      );
+
+      const EplContext = ({ row }) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {row.xgForm != null && (
+            <Pill
+              tone={
+                row.xgForm >= 0.6 ? "edge" : row.xgForm >= 0.4 ? "info" : "soft"
+              }
+            >
+              xG {row.xgForm.toFixed(2)}
+            </Pill>
+          )}
+          {row.cleanSheet != null && (
+            <Pill tone={row.cleanSheet >= 0.4 ? "edge" : "info"}>
+              CS {Math.round(row.cleanSheet * 100)}%
+            </Pill>
+          )}
+        </div>
+      );
+
+      const ContextCell = ({ league, row }) => {
+        if (league === "MLB") return <MlbContext row={row} />;
+        if (league === "NBA") return <NbaContext row={row} />;
+        return <EplContext row={row} />;
+      };
+
+      // ── Edges list ────────────────────────────────────────────────────
+      const EdgesList = ({ league, rows, threshold, onSelect, selectedId }) => (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-2 mb-1">
+            <div className="flex items-center gap-2">
+              <Icon name="flame" size={16} className="text-emerald-600" />
+              <h2 className="text-[16px] font-bold text-slate-900">
+                Today's edges
+              </h2>
+              <Pill tone="soft">{rows.length} surfaced</Pill>
+            </div>
+            <div className="flex items-center gap-2">
+              <Pill tone="info">
+                <Icon name="filter" size={11} /> Unique matchup
+              </Pill>
+            </div>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="rounded-2xl bg-white border border-slate-200 p-12 text-center">
+              <div className="text-3xl mb-3">⚾</div>
+              <div className="text-slate-500 text-[14px]">
+                No props for this market today.
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {rows.map((r) => {
+                const isHot = r.edge >= threshold;
+                const selected = selectedId === r.id;
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => onSelect(r.id)}
+                    className={`w-full text-left rounded-2xl bg-white border transition-all
+                ${
+                  selected
+                    ? "border-slate-900 shadow-md"
+                    : isHot
+                    ? "border-emerald-300 hot-glow"
+                    : "border-slate-200 hover:border-slate-300 hover:shadow-sm"
+                }`}
+                  >
+                    <div className="grid grid-cols-12 gap-4 items-center px-4 py-3.5">
+                      {/* Rank + avatar + player */}
+                      <div className="col-span-4 flex items-center gap-3 min-w-0">
+                        <div
+                          className={`flex items-center justify-center w-7 h-7 rounded-lg text-[12px] font-bold flex-shrink-0
+                    ${
+                      isHot
+                        ? "bg-emerald-500 text-white"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+                        >
+                          {r.rank}
+                        </div>
+                        <Avatar name={r.player} league={league} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[15px] font-semibold text-slate-900 truncate">
+                              {r.player}
+                            </span>
+                            {isHot && (
+                              <Icon
+                                name="flame"
+                                size={13}
+                                className="text-emerald-600 flex-shrink-0"
+                              />
+                            )}
+                          </div>
+                          <div className="text-[12px] text-slate-500 truncate">
+                            {r.team}
+                            {r.opp ? ` · ${r.opp}` : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bet line */}
+                      <div className="col-span-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-[11px] font-bold flex-shrink-0
+                      ${
+                        r.side === "OVER" || r.side === "YES"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-rose-50 text-rose-700"
+                      }`}
+                          >
+                            {r.side === "OVER"
+                              ? "O"
+                              : r.side === "UNDER"
+                              ? "U"
+                              : "Y"}
+                          </span>
+                          <div>
+                            <div className="text-[15px] font-bold text-slate-900 num leading-none">
+                              {r.line.toFixed(1)}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {r.market}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Book → Model */}
+                      <div className="col-span-2">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[12px] text-slate-400 num">
+                            {r.book.toFixed(1)}%
+                          </span>
+                          <Icon
+                            name="arrow-right"
+                            size={11}
+                            className="text-slate-300"
+                          />
+                          <span className="text-[14px] font-semibold text-slate-900 num">
+                            {r.model.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          book → model
+                        </div>
+                      </div>
+
+                      {/* Edge */}
+                      <div className="col-span-2">
+                        <div
+                          className={`text-[20px] font-bold leading-none ${
+                            isHot
+                              ? "text-emerald-600"
+                              : r.edge >= 4
+                              ? "text-emerald-600/80"
+                              : "text-slate-700"
+                          }`}
+                        >
+                          +{r.edge.toFixed(1)}%
+                        </div>
+                        <div className="mt-1.5">
+                          <EdgeBar edge={r.edge} threshold={threshold} />
+                        </div>
+                      </div>
+
+                      {/* Game time */}
+                      <div className="col-span-1 text-right">
+                        <div className="text-[12px] font-medium text-slate-700">
+                          {(r.gameTime || "TBD").replace(" ET", "")}
+                        </div>
+                        <div className="text-[11px] text-slate-400">ET</div>
+                      </div>
+
+                      {/* Context + Grade */}
+                      <div className="col-span-1 flex items-center gap-2 justify-end">
+                        <ContextCell league={league} row={r} />
+                        <Grade g={r.grade} />
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+
+      // ── Detail panel ──────────────────────────────────────────────────
+      const Stat = ({ label, value, tone = "default" }) => (
+        <div>
+          <div className="text-[11px] text-slate-500">{label}</div>
+          <div
+            className={`mt-0.5 text-[15px] font-semibold ${
+              tone === "edge"
+                ? "text-emerald-600"
+                : tone === "warn"
+                ? "text-amber-600"
+                : "text-slate-900"
+            }`}
+          >
+            {value}
+          </div>
+        </div>
+      );
+
+      const DetailPanel = ({ league, row }) => {
+        if (!row)
+          return (
+            <Card className="p-8 text-center text-slate-400 text-[13px]">
+              <Icon
+                name="mouse-pointer-click"
+                size={28}
+                className="mx-auto mb-3 text-slate-300"
+              />
+              Select a play to see the full breakdown
+            </Card>
+          );
+        const kelly =
+          Math.max(
+            0,
+            (row.model / 100 - row.book / 100) / (1 - row.book / 100)
+          ) * 100;
+        return (
+          <Card className="overflow-hidden sticky top-24">
+            <div className="px-5 pt-5 pb-4 bg-gradient-to-br from-slate-50 to-white border-b border-slate-100">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <Avatar name={row.player} league={league} />
+                  <div>
+                    <div className="text-[16px] font-bold text-slate-900 leading-tight">
+                      {row.player}
+                    </div>
+                    <div className="text-[12px] text-slate-500">
+                      {row.team}
+                      {row.opp ? ` · ${row.opp}` : ""}
+                    </div>
+                  </div>
+                </div>
+                <Pill tone="edge">
+                  #{row.rank} · {row.grade.letter}
+                </Pill>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* Recommendation box */}
+              <div className="rounded-2xl bg-emerald-50/60 border border-emerald-100 p-4">
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-emerald-700/70 font-semibold">
+                      Recommendation
+                    </div>
+                    <div className="mt-1 text-[16px] font-bold text-slate-900">
+                      {row.side} {row.line.toFixed(1)} · {row.market}
+                    </div>
+                    <div className="text-[12px] text-slate-500 mt-0.5">
+                      {row.gameTime || "TBD"}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] text-emerald-700/70 font-semibold uppercase tracking-wider">
+                      Edge
+                    </div>
+                    <div className="text-[28px] font-bold text-emerald-600 leading-none">
+                      +{row.edge.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-[11px] mb-1.5">
+                    <span className="text-slate-500">
+                      Book{" "}
+                      <span className="font-semibold text-slate-700 num">
+                        {row.book.toFixed(1)}%
+                      </span>
+                    </span>
+                    <span className="text-emerald-700">
+                      Model{" "}
+                      <span className="font-bold num">
+                        {row.model.toFixed(1)}%
+                      </span>
+                    </span>
+                  </div>
+                  <div className="relative h-2.5 bg-white rounded-full overflow-hidden border border-slate-200">
+                    <div
+                      className="absolute inset-y-0 left-0 bg-slate-300"
+                      style={{ width: `${row.book}%` }}
+                    />
+                    <div
+                      className="absolute inset-y-0 bg-emerald-400/80"
+                      style={{ left: `${row.book}%`, width: `${row.edge}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Key stats */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <Stat
+                  label="Suggested stake"
+                  value={`${(kelly * 0.25).toFixed(1)}u`}
+                  tone="edge"
+                />
+                <Stat
+                  label="Implied odds"
+                  value={`${(100 - row.book).toFixed(1)}%`}
+                />
+                <Stat label="Sample" value="142 games" />
+                <Stat label="Variance" value="±2.3%" />
+              </div>
+
+              {/* Why this edge */}
+              <div>
+                <div className="text-[12px] font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+                  <Icon name="layers" size={13} className="text-slate-400" />
+                  Why this edge?
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { k: "Base rate (season)", v: 38 },
+                    { k: "Opponent defense", v: 22 },
+                    { k: "Recent form (L10)", v: 18 },
+                    {
+                      k:
+                        league === "MLB"
+                          ? "Park & weather"
+                          : league === "NBA"
+                          ? "Pace & fatigue"
+                          : "xG vs opp xGA",
+                      v: 15,
+                    },
+                    { k: "Lineup & market", v: 7 },
+                  ].map((s) => (
+                    <div key={s.k} className="flex items-center gap-3">
+                      <div className="text-[12px] text-slate-700 flex-1 truncate">
+                        {s.k}
+                      </div>
+                      <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-400 rounded-full"
+                          style={{ width: `${s.v * 2}%` }}
+                        />
+                      </div>
+                      <div className="text-[11px] font-medium num text-slate-500 w-9 text-right">
+                        {s.v}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* League-specific context */}
+              <div>
+                <div className="text-[12px] font-semibold text-slate-700 mb-2">
+                  Context
+                </div>
+                {league === "MLB" && row.conditions && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <Stat
+                      label="Wind"
+                      value={row.conditions.label}
+                      tone={row.conditions.wind === "IN" ? "warn" : "default"}
+                    />
+                    <Stat
+                      label="Team ISO"
+                      value={row.iso != null ? row.iso.toFixed(3) : "—"}
+                      tone="edge"
+                    />
+                    <Stat
+                      label="Park factor"
+                      value={row.pf != null ? row.pf.toFixed(2) : "—"}
+                    />
+                  </div>
+                )}
+                {league === "NBA" && row.fatigue && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <Stat
+                      label="Fatigue"
+                      value={row.fatigue.label}
+                      tone={row.fatigue.b2b ? "warn" : "edge"}
+                    />
+                    <Stat
+                      label="Steam"
+                      value={row.steam.label}
+                      tone={row.steam.moved ? "edge" : "default"}
+                    />
+                    <Stat label="Rest" value={`${row.fatigue.restDays}d`} />
+                  </div>
+                )}
+                {league === "EPL" && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <Stat
+                      label="xG form"
+                      value={row.xgForm != null ? row.xgForm.toFixed(2) : "—"}
+                      tone="edge"
+                    />
+                    <Stat
+                      label="CS prob"
+                      value={
+                        row.cleanSheet != null
+                          ? `${Math.round(row.cleanSheet * 100)}%`
+                          : "—"
+                      }
+                    />
+                    <Stat label="Form" value="WWDLW" />
+                  </div>
+                )}
+              </div>
+
+              {/* Model note */}
+              <div className="pt-1 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-[12px] text-slate-500">
+                <Icon
+                  name="info"
+                  size={12}
+                  className="inline mr-1 text-slate-400"
+                />
+                Edges sourced from Odds API + pybaseball model. Re-run{" "}
+                <code className="text-slate-700">process_model.py</code> daily
+                for fresh data.
+              </div>
+            </div>
+          </Card>
+        );
+      };
+
+      // ── System Health ─────────────────────────────────────────────────
+      const SystemHealth = ({ health, primaryFeed }) => (
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Icon name="activity" size={15} className="text-emerald-600" />
+              <span className="text-[14px] font-semibold text-slate-900">
+                System health
+              </span>
+              <Pill tone="warn">Pre-pivot</Pill>
+            </div>
+            <span className="text-[11px] text-slate-500">
+              Updated{" "}
+              {new Date().toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-12 gap-5">
+            {/* Data regime */}
+            <div className="col-span-12 md:col-span-4">
+              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                Data regime
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-[20px] font-bold text-slate-900 num">
+                  {health.regime.y2025}%
+                </span>
+                <span className="text-[12px] text-slate-500">2025</span>
+                <span className="text-slate-300">·</span>
+                <span className="text-[20px] font-bold text-emerald-600 num">
+                  {health.regime.y2026}%
+                </span>
+                <span className="text-[12px] text-slate-500">2026</span>
+              </div>
+              <div className="mt-2 h-2 bg-slate-100 rounded-full relative overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 bg-slate-400 rounded-l-full"
+                  style={{ width: `${health.regime.y2025}%` }}
+                />
+                <div
+                  className="absolute inset-y-0 bg-emerald-500"
+                  style={{
+                    left: `${health.regime.y2025}%`,
+                    width: `${health.regime.y2026}%`,
+                  }}
+                />
+              </div>
+              <div className="mt-2 text-[11px] text-slate-500">
+                Pivot {health.pivotDate} → 100% 2026
+              </div>
+            </div>
+
+            {/* Signal strength */}
+            <div className="col-span-12 md:col-span-3">
+              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                Signal strength
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-[28px] font-bold text-slate-900 num leading-none">
+                  {health.signalStrength}
+                  <span className="text-slate-400 text-[16px]">%</span>
+                </span>
+                <Pill tone="edge">High</Pill>
+              </div>
+              <div className="mt-2 h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 rounded-full"
+                  style={{ width: `${health.signalStrength}%` }}
+                />
+              </div>
+              <div className="mt-2 text-[11px] text-slate-500">
+                EV threshold {health.threshold.toFixed(1)}%
+              </div>
+            </div>
+
+            {/* Live feeds */}
+            <div className="col-span-12 md:col-span-5">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                  Live feeds
+                </div>
+                <span className="text-[11px] text-slate-500">
+                  primary ·{" "}
+                  <span className="text-slate-700 font-medium">
+                    {primaryFeed}
+                  </span>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {health.ingestion.map((src) => (
+                  <div
+                    key={src.name}
+                    className="flex items-center gap-2 text-[12px]"
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                        src.status === "live"
+                          ? "bg-emerald-500 live-dot"
+                          : "bg-amber-400"
+                      }`}
+                    />
+                    <span className="text-slate-700 flex-1 truncate">
+                      {src.name}
+                    </span>
+                    <span className="text-slate-400 text-[11px] num">
+                      {src.latency < 1000
+                        ? `${src.latency}ms`
+                        : `${(src.latency / 3600).toFixed(1)}h`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      );
+
+      /* ═══════════════════════════════════════════════════════════════════
+   APP
+═══════════════════════════════════════════════════════════════════ */
+      function App() {
+        const [league, setLeague] = useState("MLB");
+        const [market, setMarket] = useState("All Markets");
+        const [selectedId, setSelectedId] = useState(null);
+
+        const leagueData = LEAGUES[league];
+        const threshold = SYSTEM_HEALTH.threshold;
+
+        useEffect(() => {
+          // Default to Top 5 for MLB, All Markets for other leagues
+          setMarket(league === "MLB" ? "Top 5" : "All Markets");
+          setSelectedId(leagueData.rows[0]?.id ?? null);
+        }, [league]); // eslint-disable-line
+
+        const counts = useMemo(() => {
+          const c = {
+            "All Markets": leagueData.rows.length,
+            "Top 5": Math.min(5, leagueData.rows.length),
+          };
+          leagueData.rows.forEach((r) => {
+            c[r.market] = (c[r.market] || 0) + 1;
+          });
+          leagueData.markets.forEach((m) => {
+            if (!(m in c)) c[m] = 0;
+          });
+          return c;
+        }, [leagueData]);
+
+        const filtered = useMemo(() => {
+          if (market === "Top 5") return leagueData.rows.slice(0, 5);
+          if (market === "All Markets") return leagueData.rows;
+          return leagueData.rows.filter((r) => r.market === market);
+        }, [leagueData, market]);
+
+        const selected =
+          filtered.find((r) => r.id === selectedId) || filtered[0] || null;
+
+        return (
+          <div className="min-h-screen bg-surface-base">
+            <Header
+              league={league}
+              setLeague={setLeague}
+              leagues={Object.keys(LEAGUES)}
+            />
+
+            <main className="max-w-[1440px] mx-auto px-6 py-6 space-y-6">
+              <Hero
+                league={league}
+                leagueData={leagueData}
+                threshold={threshold}
+              />
+
+              <MarketChips
+                markets={leagueData.markets}
+                value={market}
+                onChange={(m) => {
+                  setMarket(m);
+                  setSelectedId(null);
+                }}
+                counts={counts}
+              />
+
+              <div className="grid grid-cols-12 gap-5">
+                <div className="col-span-12 xl:col-span-8">
+                  <EdgesList
+                    league={league}
+                    rows={filtered}
+                    threshold={threshold}
+                    onSelect={setSelectedId}
+                    selectedId={selectedId}
+                  />
+                </div>
+                <div className="col-span-12 xl:col-span-4">
+                  <DetailPanel league={league} row={selected} />
+                </div>
+              </div>
+
+              <SystemHealth
+                health={SYSTEM_HEALTH}
+                primaryFeed={leagueData.primaryFeed}
+              />
+
+              <div className="text-[11px] text-slate-400 pt-2 pb-6 text-center">
+                EdgeModel · Sources: {leagueData.sources.join(" · ")} · For
+                research only.
+              </div>
+            </main>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

@@ -3,18 +3,14 @@ fetch_all_data.py
 ─────────────────────────────────────────────────────────────────────────────
 Triple-stream MLB data ingestion.
 
-  Stream 1 – Kalshi          : Historical KXMLBGAME candlesticks (2025 + 2026)
+  Stream 1 – Kalshi          : Today's KXMLBGAME open markets (yes_ask prob)
   Stream 2 – The Odds API    : Live player props (Outs, Ks, Total Bases, Hits)
   Stream 3 – pybaseball      : Team H2H schedule/results logs (2025 + 2026)
 
 All outputs land in data/raw/:
-  kalshi_candles.json
+  kalshi_today.json
   odds_props.json
   h2h_2025.csv  /  h2h_2026.csv
-
-Auth note: Kalshi authentication (JWT / API-key header) is assumed to be
-           already handled by the caller or a shared auth module.  This
-           script only focuses on the data-handling logic as requested.
 
 Usage
   python fetch_all_data.py
@@ -22,10 +18,12 @@ Usage
 """
 
 import argparse
+import io as _io
 import json
 import os
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -34,36 +32,107 @@ import requests
 from dotenv import load_dotenv
 import numpy as np
 import pybaseball
-from curl_cffi.requests import Session
+from curl_cffi.requests import Session as CurlSession
 
-# ── MONKEY PATCH 1: Cloudflare bypass ────────────────────────────────────────
-# Override pybaseball's internal HTTP session to impersonate Chrome 110 so that
-# Baseball-Reference's Cloudflare WAF does not block the request.
-def get_bref_session():
-    s = Session(impersonate="chrome110")
-    s.headers.update({"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
-    return s
+# ── MONKEY PATCH 1: HTTPS enforcement + Cloudflare bypass ────────────────────
+#
+# TWO problems fixed here:
+#
+#   Problem A — Port 80 blocked:
+#     pybaseball generates http:// URLs for Baseball-Reference (port 80).
+#     Many networks block outbound HTTP; the OS raises errno 50 (ENETDOWN)
+#     before any redirect to HTTPS can happen.  We must rewrite the URL to
+#     https:// *before* the connection attempt.
+#
+#   Problem B — Wrong patch target (previous approach):
+#     Setting `pybaseball.datasources.bref.requests = session_instance` only
+#     replaces a module attribute that bref.py never reads after import.
+#     The bref class already has `self.session = requests.Session()` baked in
+#     at instantiation time.  The correct target is the `.session` attribute
+#     on the already-created BRefSession instance:
+#         pybaseball.datasources.bref.session.session  ← inner requests.Session
+#
+# Fix: replace the inner requests.Session with a thin wrapper that:
+#   1. Rewrites http://www.baseball-reference.com → https://...
+#   2. Uses curl_cffi (Chrome 110 impersonation) to bypass Cloudflare WAF
 
-pybaseball.datasources.bref.requests = get_bref_session()
+_cffi = CurlSession(impersonate="chrome110")
+_cffi.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/110.0.0.0 Safari/537.36"
+    )
+})
+
+class _BRefHttpsSession:
+    """Drop-in replacement for requests.Session inside pybaseball's BRefSession.
+    Forces https:// on every B-Ref request and routes through curl_cffi."""
+
+    def get(self, url: str, **kwargs) -> object:
+        url = url.replace(
+            "http://www.baseball-reference.com",
+            "https://www.baseball-reference.com",
+            1,
+        )
+        kwargs.pop("verify", None)   # curl_cffi handles TLS natively
+        return _cffi.get(url, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(_cffi, name)
+
+# The inner requests.Session lives at:
+#   pybaseball.team_results  (module)
+#     .session               (BRefSession instance created at import time)
+#       .session             (requests.Session — THIS is what we replace)
+import pybaseball.team_results as _tr
+_tr.session.session = _BRefHttpsSession()
 
 # ── MONKEY PATCH 2: Pandas 3.0 Copy-on-Write compatibility ───────────────────
-# pybaseball/team_results.py line ~75 uses:
-#   df['Attendance'].replace(..., inplace=True)
-# which is illegal in Pandas 3.0 strict CoW mode and raises:
-#   ChainedAssignmentError / "could not convert string to float: 'Unknown'"
-# This wrapper calls the original function then re-cleans Attendance with .loc.
-_original_schedule_and_record = pybaseball.schedule_and_record
+# pybaseball/team_results.py does:
+#   df['Attendance'].replace(..., inplace=True)   ← silent NO-OP in Pandas 3.0
+#   df['Attendance'] = df['Attendance'].astype(float)  ← ValueError: 'Unknown'
+#
+# Wrapping the return value doesn't help because the original RAISES before
+# returning. We must replace the function entirely with a CoW-safe version.
+# It uses the same _tr.session (already patched above for HTTPS + curl_cffi).
 
-def fixed_schedule_and_record(season: int, team: str) -> "pd.DataFrame":
-    df = _original_schedule_and_record(season, team)
-    # CoW-safe replacement: use .loc to assign, then to_numeric for coercion
+def _cow_safe_schedule_and_record(season: int, team: str) -> pd.DataFrame:
+    """
+    Drop-in replacement for pybaseball.team_results.schedule_and_record.
+
+    Replicates B-Ref table parsing with CoW-safe attendance cleaning.
+    Uses _tr.session so the HTTPS rewrite + curl_cffi bypass applies.
+    """
+    url = (
+        f"http://www.baseball-reference.com/teams/{team}"
+        f"/{season}-schedule-scores.shtml"
+    )
+    html_content = _tr.session.get(url).content
+    tables = pd.read_html(_io.BytesIO(html_content), flavor=["lxml", "html.parser"])
+    df = tables[0].copy()                    # own the buffer from the start
+
+    # Strip asterisks from column names (B-Ref uses them for notes)
+    df.columns = [str(c).replace("*", "") for c in df.columns]
+
+    # Remove repeated header rows B-Ref embeds mid-table every ~20 rows.
+    # The repeating row has "Gm#" in the Gm column (or "Gm#" column itself).
+    for _gc in ("Gm", "Gm#"):
+        if _gc in df.columns:
+            df = df[df[_gc].astype(str) != "Gm#"].reset_index(drop=True)
+            break
+
+    # CoW-safe attendance cleaning — avoids inplace + astype(float) pattern
     if "Attendance" in df.columns:
-        df = df.copy()                                         # own the buffer
-        df.loc[df["Attendance"] == "Unknown", "Attendance"] = np.nan
-        df["Attendance"] = pd.to_numeric(df["Attendance"], errors="coerce")
+        att = df["Attendance"].astype(str)            # detached copy
+        att = att.where(att != "Unknown", other=pd.NA)
+        att = att.str.replace(",", "", regex=False)
+        df["Attendance"] = pd.to_numeric(att, errors="coerce")
+
     return df
 
-pybaseball.schedule_and_record = fixed_schedule_and_record
+_tr.schedule_and_record        = _cow_safe_schedule_and_record
+pybaseball.schedule_and_record = _cow_safe_schedule_and_record
 
 # ── env ──────────────────────────────────────────────────────────────────────
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -81,14 +150,10 @@ RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── constants ─────────────────────────────────────────────────────────────────
 KALSHI_SERIES      = "KXMLBGAME"
-KALSHI_START_2025  = "2025-03-20T00:00:00Z"
-KALSHI_END_2025    = "2025-11-01T00:00:00Z"
-KALSHI_START_2026  = "2026-01-01T00:00:00Z"
-KALSHI_END_NOW     = None  
 
 ODDS_SPORT         = "baseball_mlb"
 ODDS_REGIONS       = "us"
-ODDS_MARKETS       = "pitcher_strikeouts,batter_hits,batter_total_bases,pitcher_outs"
+ODDS_MARKETS       = "pitcher_strikeouts,batter_hits,batter_total_bases,pitcher_outs_recorded"
 ODDS_BOOKMAKERS    = "draftkings,fanduel,betmgm,caesars"
 
 PYBASEBALL_TEAMS   = [
@@ -106,139 +171,181 @@ PYBASEBALL_TEAMS   = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STREAM 1 — KALSHI
+# STREAM 1 — KALSHI  (today's games only)
 # ─────────────────────────────────────────────────────────────────────────────
+# Architecture note
+# ─────────────────
+# KXMLBGAME binary markets do NOT store OHLCV candlestick history — the
+# candlestick endpoint returns 0 results for every market in this series.
+# The correct signal is `yes_ask` (implied win probability) on the market
+# object itself, which is returned directly from the /markets list call.
+#
+# We fetch only status=open markets and filter to those whose close_time
+# falls on today's date so the pipeline only processes games being played
+# today. One API call, no per-market requests, completes in ~1 second.
 
-# ── Updated Kalshi Constants ────────────────────────────────────────────────
-# Use the elections/public data URL which allows more open GET requests
-KALSHI_PUBLIC_URL = "https://api.elections.kalshi.com/trade-api/v2"
+KALSHI_MARKETS_URL = "https://api.elections.kalshi.com/trade-api/v2/markets"
 
-def _fetch_kalshi_markets(series_ticker: str) -> list[dict]:
-    """Fetch markets using the public Elections Kalshi series endpoint."""
-    # elections.kalshi.com is the public-facing host for event/sports markets
-    # The base markets endpoint
-    url = "https://api.elections.kalshi.com/trade-api/v2/markets"
-
-    params = {
-        "series_ticker": "KXMLBGAME",  # or your series_ticker variable
-        "status": "open",             # Recommended to only see active bets
-        "limit": 1000                 # Maximize results per call
-    }
-
-    try:
-        # No params needed; this endpoint returns all markets for the series
-        resp = requests.get(url, params=params, headers=_kalshi_headers(), timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        # Markets are usually under the 'markets' key in the series response
-        return data.get("markets", [])
-    except Exception as e:
-        print(f"    [Kalshi Error] Series fetch failed: {e}")
-        return []
 
 def _kalshi_headers() -> dict:
-    return {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {KALSHI_API_KEY}"
-    }
+    """Public read headers.  No auth required for market listing."""
+    return {"Accept": "application/json"}
 
-def _fetch_kalshi_candles(
-    market_ticker: str,
-    period_interval: int = 60,  # minutes
-    start_ts: Optional[str] = None,
-    end_ts: Optional[str] = None,
-) -> list[dict]:
-    """Fetch OHLCV candlestick data for a single market."""
-    # 1. Use the public URL instead of the private trading base URL
-    url = f"{KALSHI_PUBLIC_URL}/markets/{market_ticker}/candlesticks"
-    
-    params = {"period_interval": period_interval}
-    if start_ts:
-        params["start_ts"] = int(pd.to_datetime(start_ts).timestamp())
-    if end_ts:
-        params["end_ts"] = int(pd.to_datetime(end_ts).timestamp())
-
-    # 2. Remove the auth headers, just accept JSON
-    headers = {"Accept": "application/json"}
-
-    resp = requests.get(url, headers=headers, params=params, timeout=20)
-    if resp.status_code == 404:
-        return []
-    resp.raise_for_status()
-    return resp.json().get("candlesticks", [])
-
-def _iso_to_unix(iso_str: Optional[str]) -> Optional[int]:
-    if not iso_str:
-        return None
-    return int(pd.to_datetime(iso_str).timestamp())
 
 def fetch_kalshi(output_path: Path) -> None:
     """
-    Pull candlesticks for every KXMLBGAME market across 2025 and 2026 season
-    data.  Saves a JSON list to output_path.
+    Fetch today's open KXMLBGAME markets and extract implied win probability
+    (yes_ask) directly from the market object.
+
+    Output JSON schema (one entry per market):
+      {
+        "ticker":       "KXMLBGAME-26-LAD-ARI-20260430",
+        "title":        "LAD vs ARI - Apr 30",
+        "yes_ask":      0.54,   // implied home-team win probability [0–1]
+        "yes_bid":      0.52,
+        "close_time":   "2026-04-30T23:05:00Z",
+        "open_time":    "2026-04-30T12:00:00Z",
+        "status":       "open",
+        "volume":       1234
+      }
+
+    No per-market HTTP calls — everything comes from the single list response.
     """
-    print("[fetch_all_data] Stream 1 — Kalshi candlesticks…")
-    markets = _fetch_kalshi_markets(KALSHI_SERIES)
-    all_candles: list[dict] = []
+    today_str = date.today().isoformat()   # e.g. "2026-04-30"
+    print(f"[fetch_all_data] Stream 1 — Kalshi today's markets ({today_str})…")
 
-    for mkt in markets:
-        ticker     = mkt.get("ticker", "")
-        close_time = mkt.get("close_time", "")
+    params = {
+        "series_ticker": KALSHI_SERIES,
+        "status":        "open",
+        "limit":         200,   # generous ceiling; typical slate is 10–30 markets
+    }
 
-        # determine which season window to use
-        if close_time.startswith("2025"):
-            start, end = KALSHI_START_2025, KALSHI_END_2025
-        elif close_time.startswith("2026"):
-            start, end = KALSHI_START_2026, KALSHI_END_NOW
-        else:
-            continue   # outside our window
+    try:
+        resp = requests.get(KALSHI_MARKETS_URL, params=params,
+                            headers=_kalshi_headers(), timeout=20)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"  [Kalshi Error] market list fetch failed: {exc}")
+        output_path.write_text(json.dumps([], indent=2))
+        return
 
-        print(f"    {ticker}", end=" ", flush=True)
-        try:
-            candles = _fetch_kalshi_candles(ticker, start_ts=start, end_ts=end)
-        except requests.RequestException as exc:
-            print(f"[ERR: {exc}]")
-            continue
+    all_open: list[dict] = resp.json().get("markets", [])
+    print(f"    {len(all_open)} open KXMLBGAME markets total")
 
-        for c in candles:
-            c["market_ticker"] = ticker
-            c["series"]        = KALSHI_SERIES
+    # ── Debug: show the first market's time fields so we can see actual format
+    if all_open:
+        sample = all_open[0]
+        time_fields = {k: sample[k] for k in sample if "time" in k.lower() or "date" in k.lower()}
+        print(f"    [debug] sample market: ticker={sample.get('ticker','')}  time_fields={time_fields}")
 
-        all_candles.extend(candles)
-        print(f"({len(candles)} candles)")
-        time.sleep(0.2)
+    # ── Filter to today only ─────────────────────────────────────────────────
+    # close_time is typically an ISO-8601 UTC string "2026-04-30T23:05:00Z"
+    # but some markets use Unix timestamps (int).  Handle both.
+    def _market_date(mkt: dict) -> str:
+        """Return YYYY-MM-DD for a market's close_time, or '' on failure."""
+        ct = mkt.get("close_time") or mkt.get("expiration_time") or mkt.get("end_time") or ""
+        if isinstance(ct, (int, float)):
+            # Unix timestamp → date string
+            try:
+                return pd.Timestamp(ct, unit="s", tz="UTC").strftime("%Y-%m-%d")
+            except Exception:
+                return ""
+        if isinstance(ct, str) and len(ct) >= 10:
+            return ct[:10]
+        return ""
 
-    output_path.write_text(json.dumps(all_candles, indent=2))
-    print(f"  → {len(all_candles)} total candles saved to {output_path}")
+    today_markets = [m for m in all_open if _market_date(m) == today_str]
+    print(f"    {len(today_markets)} markets closing today")
+
+    # ── Extract implied probability from market object ────────────────────────
+    # yes_ask / yes_bid are in cents (0–100); normalise to [0, 1].
+    results: list[dict] = []
+    for mkt in today_markets:
+        raw_ask = mkt.get("yes_ask")
+        raw_bid = mkt.get("yes_bid")
+        yes_ask = round(raw_ask / 100, 4) if raw_ask is not None else None
+        yes_bid = round(raw_bid / 100, 4) if raw_bid is not None else None
+
+        results.append({
+            "ticker":     mkt.get("ticker", ""),
+            "title":      mkt.get("title", ""),
+            "yes_ask":    yes_ask,
+            "yes_bid":    yes_bid,
+            "close_time": mkt.get("close_time", ""),
+            "open_time":  mkt.get("open_time", ""),
+            "status":     mkt.get("status", ""),
+            "volume":     mkt.get("volume", 0),
+        })
+        ask_pct = f"{yes_ask:.1%}" if yes_ask is not None else "n/a"
+        print(f"    {mkt.get('ticker','')}  yes_ask={ask_pct}")
+
+    output_path.write_text(json.dumps(results, indent=2))
+    print(f"  → {len(results)} today's markets saved to {output_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STREAM 2 — THE ODDS API  (player props)
 # ─────────────────────────────────────────────────────────────────────────────
+# Credit-optimisation notes
+# ──────────────────────────
+# The Odds API charges per /events/{id}/odds call (cost = markets × regions).
+# With 4 markets × 1 region = 4 credits per game.  On a typical week the
+# /events list returns 80–100 upcoming games; calling props for all of them
+# wastes ~320–400 credits on games that aren't being played today.
+#
+# Fixes applied:
+#   1. commenceTimeFrom / commenceTimeTo — only events starting today (UTC).
+#      Window is today 00:00 UTC → tomorrow 07:00 UTC so west-coast night
+#      games (start ~02:00 UTC next day local) are never cut off.
+#   2. Log x-requests-remaining from every response header so you can track
+#      burn rate across runs.
+#   3. No artificial sleep — 10–15 today-only calls don't need throttling.
 
-def _get_live_events() -> list[dict]:
+def _log_credits(resp: requests.Response, label: str = "") -> None:
+    """Print remaining API credits from response headers (if present)."""
+    remaining = resp.headers.get("x-requests-remaining")
+    used      = resp.headers.get("x-requests-used")
+    if remaining is not None:
+        tag = f"  [{label}]" if label else ""
+        print(f"    [Odds API credits]{tag} used={used}  remaining={remaining}")
+
+
+def _get_today_events() -> list[dict]:
     """
-    Return full event objects (id, home_team, away_team, commence_time) for
-    all upcoming MLB games.  We need home_team here so it can be stored in
-    the JSON and later joined with weather data in process_model.py.
+    Return full event objects for MLB games starting today (local day in UTC).
+
+    Uses commenceTimeFrom / commenceTimeTo to avoid fetching the full
+    multi-week event list and burning credits on games not played today.
+    Window: today 00:00:00Z → tomorrow 07:00:00Z (catches all US timezones).
     """
     if not ODDS_API_KEY:
         raise EnvironmentError("ODDS_API_KEY is not set in .env")
+
+    from datetime import datetime, timezone, timedelta
+    today_utc    = datetime.now(timezone.utc).replace(
+                       hour=0, minute=0, second=0, microsecond=0)
+    window_end   = today_utc + timedelta(hours=31)   # 31 h covers overnight PT games
+
     url    = f"{ODDS_BASE_URL}/sports/{ODDS_SPORT}/events"
-    params = {"apiKey": ODDS_API_KEY, "dateFormat": "iso"}
-    resp   = requests.get(url, params=params, timeout=15)
+    params = {
+        "apiKey":             ODDS_API_KEY,
+        "dateFormat":         "iso",
+        "commenceTimeFrom":   today_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "commenceTimeTo":     window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    resp = requests.get(url, params=params, timeout=15)
     resp.raise_for_status()
+    _log_credits(resp, "events")
+
     events = resp.json()
-    print(f"    Found {len(events)} upcoming MLB events")
-    return events   # full dicts, not just IDs
+    print(f"    Found {len(events)} MLB events today")
+    return events
 
 
-def _fetch_event_player_props(event_id: str) -> tuple[list[dict], str, str]:
+def _fetch_event_player_props(event_id: str) -> tuple[list[dict], str, str, int, int]:
     """
     Fetch player props for a single event.
-    Returns (bookmakers, home_team, away_team).
-    The /events/{id}/odds endpoint includes home_team at the top level,
-    so we capture it here rather than making a separate lookup.
+    Returns (bookmakers, home_team, away_team, credits_used, credits_remaining).
     """
     url    = f"{ODDS_BASE_URL}/sports/{ODDS_SPORT}/events/{event_id}/odds"
     params = {
@@ -251,57 +358,67 @@ def _fetch_event_player_props(event_id: str) -> tuple[list[dict], str, str]:
     }
     resp = requests.get(url, params=params, timeout=15)
     if resp.status_code == 422:
-        # market not listed for this event — normal during pre-game window
-        return [], "", ""
+        # props not yet listed for this event (pre-game window) — not an error
+        return [], "", "", 0, 0
     resp.raise_for_status()
-    body = resp.json()
+
+    used      = int(resp.headers.get("x-requests-used",      0))
+    remaining = int(resp.headers.get("x-requests-remaining", 0))
+    body      = resp.json()
     return (
         body.get("bookmakers", []),
-        body.get("home_team",  ""),   # e.g. "Kansas City Royals"
+        body.get("home_team",  ""),
         body.get("away_team",  ""),
+        used,
+        remaining,
     )
 
 
 def fetch_odds(output_path: Path) -> None:
     """
-    Pull live player props for all upcoming MLB games.
+    Pull live player props for today's MLB games only.
     Stores home_team + away_team alongside bookmakers so process_model.py
     can apply wind/park multipliers per stadium.
     Saves structured JSON to output_path.
     """
     print("[fetch_all_data] Stream 2 — The Odds API player props…")
-    events    = _get_live_events()
+    events    = _get_today_events()
     all_props: list[dict] = []
+    credits_remaining: Optional[int] = None
 
     for evt in events:
-        eid = evt["id"]
-        # Prefer the full team names from the /events endpoint (already have them)
+        eid              = evt["id"]
         home_from_events = evt.get("home_team", "")
         away_from_events = evt.get("away_team", "")
 
         print(f"    {home_from_events} vs {away_from_events}", end=" ", flush=True)
         try:
-            bookmakers, home_from_odds, away_from_odds = _fetch_event_player_props(eid)
+            bookmakers, home_from_odds, away_from_odds, used, remaining = (
+                _fetch_event_player_props(eid)
+            )
         except requests.RequestException as exc:
             print(f"[ERR: {exc}]")
             continue
 
-        # /events/odds also returns home_team; fall back to /events value if empty
+        if remaining:
+            credits_remaining = remaining
+
         home_team = home_from_odds or home_from_events
         away_team = away_from_odds or away_from_events
 
         all_props.append({
-            "event_id":       eid,
-            "home_team":      home_team,   # full name, e.g. "Kansas City Royals"
-            "away_team":      away_team,
-            "commence_time":  evt.get("commence_time", ""),
-            "bookmakers":     bookmakers,
+            "event_id":      eid,
+            "home_team":     home_team,
+            "away_team":     away_team,
+            "commence_time": evt.get("commence_time", ""),
+            "bookmakers":    bookmakers,
         })
-        print(f"({len(bookmakers)} bookmakers)")
-        time.sleep(0.15)
+        bk_count = len(bookmakers)
+        print(f"({bk_count} bookmakers, {used} credits used)")
 
     output_path.write_text(json.dumps(all_props, indent=2))
-    print(f"  → Props for {len(all_props)} events saved to {output_path}")
+    cr_str = f"  {credits_remaining} credits remaining" if credits_remaining else ""
+    print(f"  → Props for {len(all_props)} events saved to {output_path}.{cr_str}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -369,22 +486,26 @@ def fetch_pybaseball(output_dir: Path) -> None:
     Build and save H2H CSVs for 2025 and 2026 (YTD).
     """
     print("[fetch_all_data] Stream 3 — pybaseball H2H logs…")
-    
     pybaseball.cache.enable()
-    pybaseball.cache.purge()
-
     current_year = 2026
 
     for season in [2025, current_year]:
         print(f"  Season {season}:")
         df = _build_h2h(season)
+        if df.empty:
+            print(f"    No data returned for {season}.")
+            continue
+        out_path = output_dir / f"h2h_{season}.csv"
+        df.to_csv(out_path, index=False)
+        print(f"  → {len(df)} rows saved to {out_path}")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
 
 STREAM_MAP = {
-    "kalshi":     lambda: fetch_kalshi(RAW_DIR / "kalshi_candles.json"),
+    "kalshi":     lambda: fetch_kalshi(RAW_DIR / "kalshi_today.json"),
     "odds":       lambda: fetch_odds(RAW_DIR / "odds_props.json"),
     "pybaseball": lambda: fetch_pybaseball(RAW_DIR),
 }

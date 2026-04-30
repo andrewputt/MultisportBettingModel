@@ -18,23 +18,53 @@ from nba_api.stats.endpoints import leaguegamelog, leaguedashplayerstats, player
 
 # ── Feature columns expected by the model ─────────────────────────────────────
 FEATURE_COLS = [
-    "IS_HOME", "IS_PLAYOFF", "REST_DAYS", "WIN_PCT_L10",
-    "OFF_RATING_L10", "DEF_RATING_L10", "PACE_PROXY_L10", "PM_TREND_L10",
-    "OPP_WIN_PCT_L10", "OPP_OFF_RATING_L10", "OPP_DEF_RATING_L10",
-    "OPP_PACE_PROXY_L10", "OPP_PM_TREND_L10",
-    "SERIES_GAME_NUM", "SERIES_WINS", "SERIES_LOSSES",
+    "IS_HOME",
+    "IS_PLAYOFF",
+    "REST_DAYS",
+    "WIN_PCT_L10",
+    "OFF_RATING_L10",
+    "DEF_RATING_L10",
+    "PACE_PROXY_L10",
+    "PM_TREND_L10",
+    "OPP_WIN_PCT_L10",
+    "OPP_OFF_RATING_L10",
+    "OPP_DEF_RATING_L10",
+    "OPP_PACE_PROXY_L10",
+    "OPP_PM_TREND_L10",
 ]
 
 # ── Abbreviation → display name ────────────────────────────────────────────────
 ABB_TO_NAME = {
-    "ATL": "Atlanta", "BKN": "Brooklyn", "BOS": "Boston", "CHA": "Charlotte",
-    "CHI": "Chicago", "CLE": "Cleveland", "DAL": "Dallas", "DEN": "Denver",
-    "DET": "Detroit", "GSW": "Golden State", "HOU": "Houston", "IND": "Indiana",
-    "LAC": "LA Clippers", "LAL": "LA Lakers", "MEM": "Memphis", "MIA": "Miami",
-    "MIL": "Milwaukee", "MIN": "Minnesota", "NOP": "New Orleans", "NYK": "New York",
-    "OKC": "Oklahoma City", "ORL": "Orlando", "PHI": "Philadelphia", "PHX": "Phoenix",
-    "POR": "Portland", "SAC": "Sacramento", "SAS": "San Antonio", "TOR": "Toronto",
-    "UTA": "Utah", "WAS": "Washington",
+    "ATL": "Atlanta",
+    "BKN": "Brooklyn",
+    "BOS": "Boston",
+    "CHA": "Charlotte",
+    "CHI": "Chicago",
+    "CLE": "Cleveland",
+    "DAL": "Dallas",
+    "DEN": "Denver",
+    "DET": "Detroit",
+    "GSW": "Golden State",
+    "HOU": "Houston",
+    "IND": "Indiana",
+    "LAC": "LA Clippers",
+    "LAL": "LA Lakers",
+    "MEM": "Memphis",
+    "MIA": "Miami",
+    "MIL": "Milwaukee",
+    "MIN": "Minnesota",
+    "NOP": "New Orleans",
+    "NYK": "New York",
+    "OKC": "Oklahoma City",
+    "ORL": "Orlando",
+    "PHI": "Philadelphia",
+    "PHX": "Phoenix",
+    "POR": "Portland",
+    "SAC": "Sacramento",
+    "SAS": "San Antonio",
+    "TOR": "Toronto",
+    "UTA": "Utah",
+    "WAS": "Washington",
 }
 
 # Penalty applied per missing star player (as a fraction of win probability)
@@ -45,11 +75,23 @@ INJURY_PENALTY_PER_STAR = 0.06
 # ── 1. Fetch current season game logs and compute rolling features ─────────────
 def get_current_season_features():
     print("Fetching current season (2025-26) game logs (regular + playoffs)...")
-    fields = ["GAME_ID", "GAME_DATE", "TEAM_ABBREVIATION", "MATCHUP",
-              "WL", "PTS", "FG_PCT", "REB", "AST", "PLUS_MINUS"]
+    fields = [
+        "GAME_ID",
+        "GAME_DATE",
+        "TEAM_ABBREVIATION",
+        "MATCHUP",
+        "WL",
+        "PTS",
+        "FG_PCT",
+        "REB",
+        "AST",
+        "PLUS_MINUS",
+    ]
     frames = []
     for season_type, label in [("Regular Season", 0), ("Playoffs", 1)]:
-        logs = leaguegamelog.LeagueGameLog(season="2025-26", season_type_all_star=season_type)
+        logs = leaguegamelog.LeagueGameLog(
+            season="2025-26", season_type_all_star=season_type
+        )
         part = logs.get_data_frames()[0][fields].copy()
         part["IS_PLAYOFF"] = label
         frames.append(part)
@@ -59,7 +101,9 @@ def get_current_season_features():
     df["WIN"] = df["WL"].map({"W": 1, "L": 0})
     df = df.dropna(subset=["PTS", "REB", "AST", "PLUS_MINUS"])
     df = df.sort_values(["TEAM_ABBREVIATION", "GAME_DATE"]).reset_index(drop=True)
-    df["REST_DAYS"] = df.groupby("TEAM_ABBREVIATION")["GAME_DATE"].diff().dt.days.fillna(0)
+    df["REST_DAYS"] = (
+        df.groupby("TEAM_ABBREVIATION")["GAME_DATE"].diff().dt.days.fillna(0)
+    )
     df["IS_HOME"] = df["MATCHUP"].apply(lambda x: 1 if "vs." in x else 0)
 
     def roll(col, window=10):
@@ -85,14 +129,19 @@ def get_current_season_features():
         .last()
         .reset_index()
     )
-    print(f"  Got stats for {len(latest)} teams (last game: {latest['GAME_DATE'].max().date()})")
+    print(
+        f"  Got stats for {len(latest)} teams (last game: {latest['GAME_DATE'].max().date()})"
+    )
 
     # Build series context for each (team, opponent) pair currently in playoffs.
     # Values represent totals from games already played — used as context for the next game.
     series_context = {}
+    playoffs_rest_advantage = {}
     playoff_games = df[df["IS_PLAYOFF"] == 1].copy()
     if not playoff_games.empty:
-        for (team, opp), grp in playoff_games.groupby(["TEAM_ABBREVIATION", "OPP_TEAM"]):
+        for (team, opp), grp in playoff_games.groupby(
+            ["TEAM_ABBREVIATION", "OPP_TEAM"]
+        ):
             grp = grp.sort_values("GAME_DATE")
             n_played = len(grp)
             n_wins = int(grp["WIN"].sum())
@@ -101,9 +150,11 @@ def get_current_season_features():
                 "SERIES_WINS": n_wins,
                 "SERIES_LOSSES": n_played - n_wins,
             }
-        print(f"  Computed series context for {len(series_context)} team-opponent pairs")
+        print(
+            f"  Computed series context for {len(series_context)} team-opponent pairs"
+        )
 
-    return latest, series_context
+    return latest, series_context, playoffs_rest_advantage
 
 
 # ── 2. Injury detection ────────────────────────────────────────────────────────
@@ -143,7 +194,11 @@ def get_injury_report(team_abbs):
     for player in all_players:
         pid = player["PLAYER_ID"]
         name = player["PLAYER_NAME"]
-        abb = next(a for a, ps in stars_by_team.items() if any(p["PLAYER_ID"] == pid for p in ps))
+        abb = next(
+            a
+            for a, ps in stars_by_team.items()
+            if any(p["PLAYER_ID"] == pid for p in ps)
+        )
         try:
             logs = playergamelog.PlayerGameLog(
                 player_id=pid, season="2025-26", season_type_all_star="Playoffs"
@@ -220,16 +275,18 @@ def parse_markets(markets):
 
         game_date = sides[0].get("expected_expiration_time", "")[:10]
 
-        parsed.append({
-            "event": event,
-            "game_date": game_date,
-            "away_abb": away_abb,
-            "home_abb": home_abb,
-            "away": ABB_TO_NAME[away_abb],
-            "home": ABB_TO_NAME[home_abb],
-            "away_implied": implied.get(away_abb),
-            "home_implied": implied.get(home_abb),
-        })
+        parsed.append(
+            {
+                "event": event,
+                "game_date": game_date,
+                "away_abb": away_abb,
+                "home_abb": home_abb,
+                "away": ABB_TO_NAME[away_abb],
+                "home": ABB_TO_NAME[home_abb],
+                "away_implied": implied.get(away_abb),
+                "home_implied": implied.get(home_abb),
+            }
+        )
 
     return parsed
 
@@ -266,21 +323,30 @@ def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats, series_context
     }
 
 
-def apply_injury_adjustment(prob, team_abb, missing_stars):
+def apply_injury_adjustment(prob, team_abb, missing_stars, playoffs_rest_advantage=None):
     """Reduce win probability by INJURY_PENALTY_PER_STAR for each missing star."""
     n_missing = len(missing_stars.get(team_abb, []))
     adjusted = prob - (n_missing * INJURY_PENALTY_PER_STAR)
+    # Apply rest advantage if provided (±1% for teams with >6 days or <2 days rest)
+    if playoffs_rest_advantage:
+        adjusted += playoffs_rest_advantage.get(team_abb, 0.0)
     return round(max(0.01, min(0.99, adjusted)), 4)
 
 
-def run_predictions(games, team_stats, model, missing_stars, series_context=None):
+def run_predictions(games, team_stats, model, missing_stars, series_context=None, playoffs_rest_advantage=None):
     results = []
     for game in games:
-        away_row = build_row(game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context)
-        home_row = build_row(game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context)
+        away_row = build_row(
+            game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context
+        )
+        home_row = build_row(
+            game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context
+        )
 
         if away_row is None or home_row is None:
-            print(f"  [WARN] Missing stats for {game['away_abb']} or {game['home_abb']} — skipping")
+            print(
+                f"  [WARN] Missing stats for {game['away_abb']} or {game['home_abb']} — skipping"
+            )
             continue
 
         df_input = pd.DataFrame([away_row, home_row])[FEATURE_COLS]
@@ -289,8 +355,8 @@ def run_predictions(games, team_stats, model, missing_stars, series_context=None
         away_base = round(float(probs[0]), 4)
         home_base = round(float(probs[1]), 4)
 
-        away_adj = apply_injury_adjustment(away_base, game["away_abb"], missing_stars)
-        home_adj = apply_injury_adjustment(home_base, game["home_abb"], missing_stars)
+        away_adj = apply_injury_adjustment(away_base, game["away_abb"], missing_stars, playoffs_rest_advantage)
+        home_adj = apply_injury_adjustment(home_base, game["home_abb"], missing_stars, playoffs_rest_advantage)
 
         away_implied = game["away_implied"]
         home_implied = game["home_implied"]
@@ -308,19 +374,21 @@ def run_predictions(games, team_stats, model, missing_stars, series_context=None
                 kelly = min(kelly, 0.25)
             else:
                 kelly = None
-            results.append({
-                "GAME_DATE": game["game_date"],
-                "MATCHUP": matchup,
-                "TEAM": name,
-                "ABB": abb,
-                "IS_HOME": is_home,
-                "MODEL_PROB": base_prob,
-                "INJ_ADJUSTED_PROB": adj_prob,
-                "STARS_OUT": n_missing,
-                "KALSHI_IMPLIED": implied,
-                "EDGE": edge,
-                "KELLY_FRACTION": kelly,
-            })
+            results.append(
+                {
+                    "GAME_DATE": game["game_date"],
+                    "MATCHUP": matchup,
+                    "TEAM": name,
+                    "ABB": abb,
+                    "IS_HOME": is_home,
+                    "MODEL_PROB": base_prob,
+                    "INJ_ADJUSTED_PROB": adj_prob,
+                    "STARS_OUT": n_missing,
+                    "KALSHI_IMPLIED": implied,
+                    "EDGE": edge,
+                    "KELLY_FRACTION": kelly,
+                }
+            )
 
     return pd.DataFrame(results)
 
@@ -330,7 +398,7 @@ if __name__ == "__main__":
     with open("src/NBA/models/nba_model.pkl", "rb") as f:
         model = pickle.load(f)
 
-    team_stats, series_context = get_current_season_features()
+    team_stats, series_context, playoffs_rest_advantage = get_current_season_features()
     markets = fetch_kalshi_markets()
     games = parse_markets(markets)
     print(f"Parsed {len(games)} unique games from Kalshi")
@@ -339,7 +407,9 @@ if __name__ == "__main__":
     all_teams = list({abb for g in games for abb in [g["away_abb"], g["home_abb"]]})
     missing_stars = get_injury_report(all_teams)
 
-    df = run_predictions(games, team_stats, model, missing_stars, series_context)
+    df = run_predictions(
+        games, team_stats, model, missing_stars, series_context, playoffs_rest_advantage
+    )
 
     if df.empty:
         print("No predictions generated.")
@@ -355,8 +425,20 @@ if __name__ == "__main__":
         edges = df[df["EDGE"].notna() & (df["EDGE"] >= 0.05)]
         if not edges.empty:
             print("\n--- EDGES >= 5% (potential value bets) ---")
-            print(edges[["GAME_DATE", "MATCHUP", "TEAM", "INJ_ADJUSTED_PROB",
-                          "STARS_OUT", "KALSHI_IMPLIED", "EDGE", "KELLY_FRACTION"]].to_string(index=False))
+            print(
+                edges[
+                    [
+                        "GAME_DATE",
+                        "MATCHUP",
+                        "TEAM",
+                        "INJ_ADJUSTED_PROB",
+                        "STARS_OUT",
+                        "KALSHI_IMPLIED",
+                        "EDGE",
+                        "KELLY_FRACTION",
+                    ]
+                ].to_string(index=False)
+            )
         else:
             print("\nNo edges >= 5% found.")
 

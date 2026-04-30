@@ -1,9 +1,10 @@
 {
-  "backtest_date": "2026-04-16T14:19:40.162357",
-  "months_tested": 33,
-  "total_games": 11904,
+  "backtest_date": "2026-04-24T13:57:40.977462",
+  "months_tested": 43,
+  "total_games": 12748,
   "features_used": [
     "IS_HOME",
+    "IS_PLAYOFF",
     "REST_DAYS",
     "WIN_PCT_L10",
     "OFF_RATING_L10",
@@ -16,6 +17,6 @@
     "OPP_PACE_PROXY_L10",
     "OPP_PM_TREND_L10"
   ],
-  "avg_accuracy": 0.6163151515151515,
-  "total_simulated_pnl": 280400.0
+  "avg_accuracy": 0.5974348837209301,
+  "total_simulated_pnl": 237000.0
 }

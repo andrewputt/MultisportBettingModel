@@ -134,11 +134,43 @@ def get_current_season_features():
         f"  Got stats for {len(latest)} teams (last game: {latest['GAME_DATE'].max().date()})"
     )
 
+    # Playoff-only rolling stats — recompute rolling windows using only playoff games.
+    # This prevents regular season performance from diluting in-series form.
+    # min_periods=2 since teams only have 3-6 playoff games at any point.
+    playoff_latest = pd.DataFrame()
+    playoff_games = df[df["IS_PLAYOFF"] == 1].copy().sort_values(
+        ["TEAM_ABBREVIATION", "GAME_DATE"]
+    ).reset_index(drop=True)
+
+    if not playoff_games.empty:
+        def roll_po(col, window=10):
+            return playoff_games.groupby("TEAM_ABBREVIATION")[col].transform(
+                lambda x: x.shift(1).rolling(window, min_periods=2).mean()
+            )
+
+        playoff_games["WIN_PCT_L10"] = roll_po("WIN")
+        playoff_games["OFF_RATING_L10"] = roll_po("PTS")
+        playoff_games["DEF_RATING_L10"] = roll_po("OPP_PTS")
+        playoff_games["PACE_PROXY_L10"] = roll_po("REB") + roll_po("AST")
+        playoff_games["PM_TREND_L10"] = roll_po("PLUS_MINUS")
+        playoff_games["REST_DAYS"] = (
+            playoff_games.groupby("TEAM_ABBREVIATION")["GAME_DATE"]
+            .diff().dt.days.fillna(0)
+        )
+
+        playoff_latest = (
+            playoff_games.dropna(subset=["WIN_PCT_L10"])
+            .sort_values("GAME_DATE")
+            .groupby("TEAM_ABBREVIATION")
+            .last()
+            .reset_index()
+        )
+        print(f"  Playoff-only stats computed for {len(playoff_latest)} teams")
+
     # Build series context for each (team, opponent) pair currently in playoffs.
     # Values represent totals from games already played — used as context for the next game.
     series_context = {}
     playoffs_rest_advantage = {}
-    playoff_games = df[df["IS_PLAYOFF"] == 1].copy()
     if not playoff_games.empty:
         for (team, opp), grp in playoff_games.groupby(
             ["TEAM_ABBREVIATION", "OPP_TEAM"]
@@ -155,7 +187,7 @@ def get_current_season_features():
             f"  Computed series context for {len(series_context)} team-opponent pairs"
         )
 
-    return latest, series_context, playoffs_rest_advantage
+    return latest, playoff_latest, series_context, playoffs_rest_advantage
 
 
 # ── 2. Injury detection ────────────────────────────────────────────────────────
@@ -214,13 +246,42 @@ def get_injury_report(team_abbs, team_stats):
                 ).get_data_frames()[0]
                 time.sleep(0.6)
                 # Players who appeared in the box score with minutes played
-                played_ids = set(
-                    box.loc[box["minutes"].notna() & (box["minutes"] != "0:00"), "personId"]
-                )
-                for player in players:
-                    if player["PLAYER_ID"] not in played_ids:
+                id_col = next((c for c in ["personId", "PLAYER_ID"] if c in box.columns), None)
+                min_col = next((c for c in ["minutes", "MIN"] if c in box.columns), None)
+                if id_col and min_col:
+                    played_ids = set(
+                        int(x) for x in box.loc[
+                            box[min_col].notna() & (box[min_col].astype(str) != "0:00") & (box[min_col].astype(str) != "0"),
+                            id_col
+                        ]
+                    )
+                else:
+                    played_ids = set()
+                if played_ids:
+                    # Only flag as missing if they also haven't appeared in 4+ days
+                    # (handles "game-time decision" players who sat one game but are returning)
+                    missed_last = {
+                        int(p["PLAYER_ID"]) for p in players
+                        if int(p["PLAYER_ID"]) not in played_ids
+                    }
+                    for player in players:
+                        if int(player["PLAYER_ID"]) not in missed_last:
+                            continue
+                        # Cross-check: was their last appearance within 4 days?
+                        pid = player["PLAYER_ID"]
+                        try:
+                            plogs = playergamelog.PlayerGameLog(
+                                player_id=pid, season="2025-26", season_type_all_star="Playoffs"
+                            ).get_data_frames()[0]
+                            time.sleep(0.4)
+                            if not plogs.empty:
+                                last_game = pd.to_datetime(plogs["GAME_DATE"].iloc[0])
+                                if (pd.Timestamp(today) - last_game).days <= 4:
+                                    continue  # recently played — likely returning, not injured
+                        except Exception:
+                            pass
                         missing[abb].append({"name": player["PLAYER_NAME"], "ppg": player.get("PTS", REFERENCE_STAR_PPG)})
-                continue  # box score check succeeded, skip fallback
+                    continue  # box score check succeeded, skip fallback
             except Exception:
                 pass  # fall through to fallback below
 
@@ -325,9 +386,19 @@ def get_team_stats(team_stats, abb):
     return row.iloc[0] if not row.empty else None
 
 
-def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats, series_context=None):
-    t = get_team_stats(team_stats, team_abb)
-    o = get_team_stats(team_stats, opp_abb)
+def build_row(team_abb, opp_abb, is_home, is_playoff, team_stats, series_context=None, playoff_team_stats=None):
+    # For playoff games, prefer playoff-only rolling stats; fall back to full-season stats
+    # if the team doesn't have enough playoff games yet.
+    if is_playoff and playoff_team_stats is not None and not playoff_team_stats.empty:
+        t = get_team_stats(playoff_team_stats, team_abb)
+        if t is None:
+            t = get_team_stats(team_stats, team_abb)
+        o = get_team_stats(playoff_team_stats, opp_abb)
+        if o is None:
+            o = get_team_stats(team_stats, opp_abb)
+    else:
+        t = get_team_stats(team_stats, team_abb)
+        o = get_team_stats(team_stats, opp_abb)
     if t is None or o is None:
         return None
     sc = (series_context or {}).get((team_abb, opp_abb), {})
@@ -360,14 +431,14 @@ def compute_injury_penalty(missing_players):
     return min(total, 0.25)
 
 
-def run_predictions(games, team_stats, model, missing_stars, series_context=None, playoffs_rest_advantage=None):
+def run_predictions(games, team_stats, model, missing_stars, series_context=None, playoffs_rest_advantage=None, playoff_team_stats=None):
     results = []
     for game in games:
         away_row = build_row(
-            game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context
+            game["away_abb"], game["home_abb"], 0, 1, team_stats, series_context, playoff_team_stats
         )
         home_row = build_row(
-            game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context
+            game["home_abb"], game["away_abb"], 1, 1, team_stats, series_context, playoff_team_stats
         )
 
         if away_row is None or home_row is None:
@@ -437,7 +508,7 @@ if __name__ == "__main__":
     with open("src/NBA/models/nba_model.pkl", "rb") as f:
         model = pickle.load(f)
 
-    team_stats, series_context, playoffs_rest_advantage = get_current_season_features()
+    team_stats, playoff_team_stats, series_context, playoffs_rest_advantage = get_current_season_features()
     markets = fetch_kalshi_markets()
     games = parse_markets(markets)
     print(f"Parsed {len(games)} unique games from Kalshi")
@@ -447,7 +518,7 @@ if __name__ == "__main__":
     missing_stars = get_injury_report(all_teams, team_stats)
 
     df = run_predictions(
-        games, team_stats, model, missing_stars, series_context, playoffs_rest_advantage
+        games, team_stats, model, missing_stars, series_context, playoffs_rest_advantage, playoff_team_stats
     )
 
     if df.empty:

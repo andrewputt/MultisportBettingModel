@@ -2,24 +2,24 @@ GAME_DATE,MATCHUP,TEAM,ABB,IS_HOME,MODEL_PROB,INJ_ADJUSTED_PROB,STARS_OUT,KALSHI
 2026-05-07,Philadelphia @ New York,Philadelphia,PHI,0,0.51,0.51,0,0.21,0.3,0.1899
 2026-05-08,LA Lakers @ Oklahoma City,LA Lakers,LAL,0,0.306,0.3743,0,0.13,0.2443,0.1404
 2026-05-10,San Antonio @ Minnesota,Minnesota,MIN,1,0.6665,0.5938,1,0.41,0.1838,0.1558
-2026-05-09,New York @ Philadelphia,Philadelphia,PHI,1,0.55,0.55,0,0.37,0.18,0.1429
 2026-05-08,San Antonio @ Minnesota,Minnesota,MIN,1,0.6665,0.5938,1,0.42,0.1738,0.1498
-2026-05-12,Oklahoma City @ LA Lakers,LA Lakers,LAL,1,0.3658,0.4341,0,0.28,0.1541,0.107
+2026-05-09,New York @ Philadelphia,Philadelphia,PHI,1,0.55,0.55,0,0.38,0.17,0.1371
 2026-05-06,Minnesota @ San Antonio,Minnesota,MIN,0,0.4491,0.3764,1,0.23,0.1464,0.0951
 2026-05-10,Oklahoma City @ LA Lakers,LA Lakers,LAL,1,0.3658,0.4341,0,0.29,0.1441,0.1015
-2026-05-10,New York @ Philadelphia,Philadelphia,PHI,1,0.55,0.55,0,0.43,0.12,0.1053
+2026-05-12,Oklahoma City @ LA Lakers,LA Lakers,LAL,1,0.3658,0.4341,0,0.29,0.1441,0.1015
+2026-05-10,New York @ Philadelphia,Philadelphia,PHI,1,0.55,0.55,0,0.41,0.14,0.1186
 2026-05-08,Cleveland @ Detroit,Cleveland,CLE,0,0.4532,0.4532,0,0.41,0.0432,0.0366
-2026-05-09,Detroit @ Cleveland,Cleveland,CLE,1,0.5991,0.5991,0,0.56,0.0391,0.0444
-2026-05-12,Detroit @ Cleveland,Cleveland,CLE,1,0.5991,0.5991,0,0.57,0.0291,0.0338
-2026-05-10,New York @ Philadelphia,New York,NYK,0,0.5348,0.5348,0,0.62,-0.0852,
+2026-05-12,Detroit @ Cleveland,Cleveland,CLE,1,0.5991,0.5991,0,0.56,0.0391,0.0444
+2026-05-09,Detroit @ Cleveland,Cleveland,CLE,1,0.5991,0.5991,0,0.58,0.0191,0.0227
 2026-05-06,Minnesota @ San Antonio,San Antonio,SAS,1,0.6127,0.6854,0,0.78,-0.0946,
+2026-05-09,New York @ Philadelphia,New York,NYK,0,0.5348,0.5348,0,0.64,-0.1052,
+2026-05-10,New York @ Philadelphia,New York,NYK,0,0.5348,0.5348,0,0.64,-0.1052,
+2026-05-09,Detroit @ Cleveland,Detroit,DET,0,0.3213,0.3213,0,0.45,-0.1287,
 2026-05-08,Cleveland @ Detroit,Detroit,DET,1,0.4684,0.4684,0,0.6,-0.1316,
-2026-05-08,San Antonio @ Minnesota,San Antonio,SAS,0,0.3927,0.4654,0,0.6,-0.1346,
-2026-05-09,New York @ Philadelphia,New York,NYK,0,0.5348,0.5348,0,0.67,-0.1352,
-2026-05-09,Detroit @ Cleveland,Detroit,DET,0,0.3213,0.3213,0,0.46,-0.1387,
 2026-05-10,San Antonio @ Minnesota,San Antonio,SAS,0,0.3927,0.4654,0,0.61,-0.1446,
-2026-05-10,Oklahoma City @ LA Lakers,Oklahoma City,OKC,0,0.651,0.5827,1,0.73,-0.1473,
-2026-05-12,Detroit @ Cleveland,Detroit,DET,0,0.3213,0.3213,0,0.47,-0.1487,
-2026-05-12,Oklahoma City @ LA Lakers,Oklahoma City,OKC,0,0.651,0.5827,1,0.74,-0.1573,
+2026-05-12,Oklahoma City @ LA Lakers,Oklahoma City,OKC,0,0.651,0.5827,1,0.73,-0.1473,
+2026-05-08,San Antonio @ Minnesota,San Antonio,SAS,0,0.3927,0.4654,0,0.62,-0.1546,
+2026-05-10,Oklahoma City @ LA Lakers,Oklahoma City,OKC,0,0.651,0.5827,1,0.74,-0.1573,
+2026-05-12,Detroit @ Cleveland,Detroit,DET,0,0.3213,0.3213,0,0.48,-0.1587,
 2026-05-07,Philadelphia @ New York,New York,NYK,1,0.6307,0.6307,0,0.8,-0.1693,
 2026-05-08,LA Lakers @ Oklahoma City,Oklahoma City,OKC,1,0.7261,0.6578,1,0.88,-0.2222,

@@ -97,29 +97,42 @@ def american_from_prob(prob: float) -> float:
 def simulate_pnl(row: pd.Series) -> float:
     """
     Naive PnL simulation for a single prop over/under bet.
-    Assumes the 'result' column holds 1 (win) or 0 (loss).
-    If no 'result' column, simulate using model_prob as win probability
-    (Monte Carlo draw).
+    Checks 'w_l' column (Baseball-Reference format: 'W', 'L', 'W-wo', etc.)
+    to determine game outcome.  Falls back to Monte Carlo if unavailable.
     """
     line_american = row.get("american", None)
     model_prob    = float(row.get("model_prob", 0.5))
     result        = row.get("result", None)
 
     if result is None:
-        # simulate outcome probabilistically
-        result = int(np.random.random() < model_prob)
+        wl = str(row.get("w_l", ""))
+        if "W" in wl:
+            result = 1
+        elif "L" in wl:
+            result = 0
+        else:
+            # no outcome recorded — simulate probabilistically
+            result = int(np.random.random() < model_prob)
 
     if result == 1:
-        # decimal odds from american
+        # Compute profit multiplier — handle both decimal and American odds formats.
+        # Decimal odds (1.0–100 range): profit per unit = odds − 1
+        # American +150: profit per unit = 150/100 = 1.50
+        # American −150: profit per unit = 100/150 ≈ 0.667
         if pd.notna(line_american):
-            american = float(line_american)
-            if american >= 100:
-                decimal = american / 100
+            price = float(line_american)
+            if 1.0 < price < 100.0:
+                # Decimal format (Odds API default)
+                profit_mult = price - 1.0
+            elif price >= 100.0:
+                # Positive American
+                profit_mult = price / 100.0
             else:
-                decimal = 100 / abs(american)
+                # Negative American
+                profit_mult = 100.0 / abs(price)
         else:
-            decimal = 1.0   # even money fallback
-        return UNIT_SIZE * decimal
+            profit_mult = 1.0   # even money fallback
+        return UNIT_SIZE * profit_mult
     else:
         return -UNIT_SIZE
 
@@ -186,13 +199,17 @@ def run_backtest(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_report(bet_df: pd.DataFrame, report_date: date, ev_threshold: float) -> dict:
-    """Aggregate results by market and produce the final report dict."""
+    # 1. MOVE THESE UP: Define these before the "if bet_df.empty" check
+    weights = WEIGHT_AFTER_PIVOT if report_date >= PIVOT_DATE else WEIGHT_BEFORE_PIVOT
+    regime = "POST_PIVOT" if report_date >= PIVOT_DATE else "PRE_PIVOT"
 
     if bet_df.empty:
         return {
             "report_date": report_date.isoformat(),
             "ev_threshold": ev_threshold,
             "status": "NO_QUALIFYING_BETS",
+            "regime": regime,           # Now the script won't crash here
+            "season_weights": weights,  # Now the summary will print correctly
             "markets": [],
         }
 

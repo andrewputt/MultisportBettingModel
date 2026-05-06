@@ -26,3 +26,4 @@ kalshi_key.pem
 BETTING_WORKFLOW.md
 src/NBA/data/predictions_today.csv
 src/NBA/data/predictions_run_*.log
+src/NBA/data/

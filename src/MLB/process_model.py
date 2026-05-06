@@ -186,22 +186,32 @@ def kalshi_yes_ask_to_prob(yes_ask_dollars: float) -> float:
     return float(np.clip(yes_ask_dollars, 0.01, 0.99))
 
 
-def american_to_prob(american: float) -> float:
+def american_to_prob(price: float) -> float:
     """
-    Convert American moneyline odds to implied probability.
+    Convert an odds price to implied probability.  Auto-detects format:
 
-    Positive odds  (e.g. +150):  prob = 100  / (odds  + 100)
-    Negative odds  (e.g. −150):  prob = |odds| / (|odds| + 100)
+      Decimal  (e.g. 1.91, 2.50):  prob = 1 / decimal
+        → Odds API returns decimal when oddsFormat=decimal (the default).
+        → Range: always > 1.0 and practically < 100.
 
-    Example  +150 → 100/250 = 0.400  (40.0%)
-    Example  −150 → 150/250 = 0.600  (60.0%)
+      Positive American (e.g. +150):  prob = 100 / (odds + 100)
+      Negative American (e.g. −150):  prob = |odds| / (|odds| + 100)
+        → Range: positive ≥ 100, negative ≤ −100.
+
+    Detection boundary: values in (1.0, 100) are treated as decimal odds;
+    values ≥ 100 or ≤ −100 are treated as American.
     """
-    american = float(american)
-    if american >= 0:
-        return 100.0 / (american + 100.0)
+    price = float(price)
+    if 1.0 < price < 100.0:
+        # Decimal odds format
+        return round(1.0 / price, 6)
+    elif price >= 100.0:
+        # Positive American
+        return round(100.0 / (price + 100.0), 6)
     else:
-        abs_odds = abs(american)
-        return abs_odds / (abs_odds + 100.0)
+        # Negative American
+        abs_odds = abs(price)
+        return round(abs_odds / (abs_odds + 100.0), 6)
 
 
 def remove_vig(probs: list[float]) -> list[float]:
@@ -335,32 +345,100 @@ def load_odds(path: Path) -> pd.DataFrame:
     df = df[df["side"].str.lower() == "over"].copy()
     df.rename(columns={"vig_free_prob": "no_vig_over_prob"}, inplace=True)
 
-    # ── deduplicate multiple bookmakers for the same prop ─────────────────────
+    # ── remove within-bookmaker duplicate rows (e.g. BetRivers repeats rows) ──
+    df = df.drop_duplicates(
+        subset=["event_id", "bookmaker", "market", "player", "line", "side"]
+    )
+
+    # ── count bookmakers per line before collapsing ───────────────────────────
+    # The API returns multiple lines per player (main + alt lines at 0.5, 1.5,
+    # 2.5, 3.5…). We track how many books offer each line so we can pick the
+    # "main" line (the line offered by the most bookmakers) instead of an alt.
+    df["bk_count"] = 1
+
+    # ── deduplicate: average no_vig_over_prob across bookmakers per line ───────
     df = df.groupby(
         ["event_id", "home_team", "away_team", "commence_time", "market", "player", "side", "line"],
         dropna=False,
         as_index=False
     ).agg({
         "no_vig_over_prob": "mean",
-        "raw_prob": "mean"
+        "raw_prob":         "mean",
+        "bk_count":         "sum",   # total bookmakers offering this specific line
     })
+
+    # ── keep only the main line per player: highest bookmaker consensus ────────
+    # Alt lines (e.g. 2.5, 3.5 when main is 4.5) have far fewer bookmakers.
+    # Sorting desc by bk_count then drop_duplicates keeps the most-offered line.
+    df = (
+        df.sort_values("bk_count", ascending=False)
+        .drop_duplicates(subset=["event_id", "market", "player"], keep="first")
+        .drop(columns=["bk_count"])
+        .reset_index(drop=True)
+    )
 
     return df
 
 
 def load_h2h(raw_dir: Path) -> pd.DataFrame:
-    """Merge 2025 + 2026 H2H CSVs with normalised column names."""
+    """Merge 2025 + 2026 H2H CSVs with normalised column names.
+
+    Date normalisation
+    ──────────────────
+    pybaseball / B-Ref writes dates as "Tuesday, May 5" (day-of-week + month/day,
+    no year).  We parse that format, force the year to match the season, and store
+    the result in a canonical `date_parsed` column (datetime64) alongside the
+    original `date` string so nothing downstream breaks.
+
+    Team name normalisation
+    ───────────────────────
+    B-Ref uses `Tm` and `Opp` (3-letter codes).  We lower-case to `tm`/`opp` then
+    add `home_team` and `away_team` aliases mapped through CANONICAL_TEAM_MAP so
+    they align with the Odds API abbreviations used everywhere else.
+    """
     frames: list[pd.DataFrame] = []
     for season in [2025, 2026]:
         fp = raw_dir / f"h2h_{season}.csv"
-        if fp.exists():
-            df = pd.read_csv(fp, low_memory=False)
-            df.columns = [c.lower().strip().replace(" ", "_") for c in df.columns]
-            df["season"] = season
-            frames.append(df)
-            print(f"  [process] H2H {season} loaded — {len(df)} games, {len(df.columns)} columns")
-        else:
+        if not fp.exists():
             print(f"  [process] WARNING: {fp} not found.")
+            continue
+
+        df = pd.read_csv(fp, low_memory=False)
+        df.columns = [c.lower().strip().replace(" ", "_") for c in df.columns]
+        df["season"] = season
+
+        # ── date parsing: "Tuesday, May 5" → datetime, year forced to season ──
+        _date_col = next(
+            (c for c in ("date", "game_date", "date_game") if c in df.columns), None
+        )
+        if _date_col:
+            raw_dates = df[_date_col].astype(str).str.strip()
+            # strip leading day-of-week if present ("Tuesday, May 5" → "May 5")
+            raw_dates = raw_dates.str.replace(r"^[A-Za-z]+,\s*", "", regex=True)
+            df["date_parsed"] = pd.to_datetime(
+                raw_dates + f", {season}",
+                format="%b %d, %Y",
+                errors="coerce",
+            )
+            bad = df["date_parsed"].isna().sum()
+            if bad:
+                print(f"  [process] WARNING: {bad} H2H {season} rows had unparseable dates.")
+        else:
+            df["date_parsed"] = pd.NaT
+
+        # ── team name aliases: tm/opp → home_team/away_team via canonical map ─
+        for src_col, dst_col in (("tm", "home_team"), ("opp", "away_team")):
+            if src_col in df.columns:
+                df[dst_col] = (
+                    df[src_col]
+                    .astype(str)
+                    .str.strip()
+                    .map(lambda x: CANONICAL_TEAM_MAP.get(x, x))
+                )
+
+        frames.append(df)
+        print(f"  [process] H2H {season} loaded — {len(df)} games, {len(df.columns)} columns")
+
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
@@ -426,6 +504,7 @@ def calculate_team_iso(h2h_df: pd.DataFrame) -> dict[str, float]:
     for team, grp in h2h_df.groupby("team"):
         canon = CANONICAL_TEAM_MAP.get(str(team), str(team))
         cols  = set(grp.columns)
+        iso   = LEAGUE_AVG_ISO   # default — overwritten by whichever tier matches
 
         # Tier 1 — true ISO ───────────────────────────────────────────────────
         has_full = {"hr", "ab", "h"}.issubset(cols)
@@ -452,13 +531,12 @@ def calculate_team_iso(h2h_df: pd.DataFrame) -> dict[str, float]:
 
         # Tier 3 — runs proxy (minimal signal, better than nothing) ────────────
         elif "r" in cols:
-            # teams that score more runs tend to have higher ISO
-            runs_per_game = grp["r"].mean()
-            # normalise: ~4.5 R/G ≈ league average → scale to league avg ISO
-            iso = round(LEAGUE_AVG_ISO * (runs_per_game / 4.5), 4)
-
-        else:
-            iso = LEAGUE_AVG_ISO
+            numeric_runs  = pd.to_numeric(grp["r"], errors="coerce")
+            runs_per_game = numeric_runs.mean()
+            if pd.notna(runs_per_game):
+                iso = round(LEAGUE_AVG_ISO * (runs_per_game / 4.5), 4)
+            else:
+                iso = LEAGUE_AVG_ISO
 
         iso_map[canon] = float(np.clip(iso, 0.05, 0.40))
 
@@ -493,8 +571,8 @@ def engineer_features(
                 (c for c in grp.columns if c in ("ra", "r_allowed", "runs_allowed")), None
             )
             team_stats[canon] = {
-                "avg_so": float(grp[so_col].mean()) if so_col else 7.5,
-                "avg_ra": float(grp[ra_col].mean()) if ra_col else 4.3,
+                "avg_so": float(pd.to_numeric(grp[so_col], errors="coerce").mean()) if so_col else 7.5,
+                "avg_ra": float(pd.to_numeric(grp[ra_col], errors="coerce").mean()) if ra_col else 4.3,
                 "iso":    iso_map.get(canon, 0.155),
             }
 
@@ -558,6 +636,8 @@ def apply_park_and_wind(odds_df: pd.DataFrame, weather: dict) -> pd.DataFrame:
     Apply stadium park-factor × wind-factor multiplier to power props
     (total_bases and hits markets).  Looks up weather by canonical home_team.
     """
+    if odds_df.empty:
+        return odds_df
     if "home_team" not in odds_df.columns:
         odds_df["home_team"]    = "UNKNOWN"
     if "park_wind_mult" not in odds_df.columns:
@@ -594,6 +674,8 @@ def compute_final_edge(odds_df: pd.DataFrame) -> pd.DataFrame:
     The multiplier applies to power props; for K / outs props park_wind_mult
     is 1.0 so the formula reduces to a simple additive adjustment.
     """
+    if odds_df.empty:
+        return odds_df
     for col in ("no_vig_over_prob", "bvp_edge", "iso_adj", "big_zone_adj"):
         odds_df[col] = pd.to_numeric(odds_df.get(col, 0.0), errors="coerce").fillna(0.0)
     odds_df["park_wind_mult"] = pd.to_numeric(
@@ -738,24 +820,55 @@ def run(target_date: str) -> pd.DataFrame:
     print("  Loading raw data…")
     kalshi_df = load_kalshi(RAW_DIR / "kalshi_candles.json")
     odds_df   = load_odds(RAW_DIR / "odds_props.json")
-    h2h_df    = load_h2h(RAW_DIR)
+    h2h_df    = load_h2h(RAW_DIR)   # 2025 + 2026 combined — kept for historical feature stats
     weather   = load_weather(RAW_DIR, target_date)
+
+    # ── filter odds_df to target_date only ───────────────────────────────────
+    # commence_time is an ISO string (e.g. "2026-05-05T17:10:00Z"); a simple
+    # string-contains check handles any timezone suffix without needing to parse.
+    if "commence_time" in odds_df.columns and not odds_df.empty:
+        odds_df = odds_df[
+            odds_df["commence_time"].astype(str).str.contains(target_date, na=False)
+        ].copy()
+
+    # ── build current_season_h2h: 2026 rows matching target_date only ────────
+    # Using both the season AND date filters prevents calendar-date collisions
+    # (e.g. May 5 2025: MIL vs ARI vs May 5 2026: MIL vs STL).
+    # ── current_season_h2h: 2026 rows for target_date only ───────────────────
+    # date_parsed was built in load_h2h by parsing "Tuesday, May 5" → datetime
+    # with the year forced to the season, so comparing against target_date
+    # (ISO format "2026-05-05") is now unambiguous.
+    _target_dt = pd.Timestamp(target_date)
+    if "date_parsed" in h2h_df.columns:
+        current_season_h2h = h2h_df[
+            (h2h_df["season"] == 2026) &
+            (h2h_df["date_parsed"].dt.normalize() == _target_dt)
+        ].copy()
+    else:
+        current_season_h2h = h2h_df[h2h_df["season"] == 2026].copy()
+
+    if current_season_h2h.empty:
+        print(
+            f"  [process_model] WARNING: no 2026 H2H rows found for {target_date}.\n"
+            f"    Home/away labels will fall back to Odds API values.\n"
+            f"    Check that h2h_2026.csv contains games for this date."
+        )
 
     print(f"  Kalshi rows:   {len(kalshi_df):,}")
     print(f"  Odds rows:     {len(odds_df):,}")
     print(f"  H2H rows:      {len(h2h_df):,}")
+    print(f"  2026 today:    {len(current_season_h2h):,} matchup(s) for {target_date}")
     print(f"  Weather teams: {len(weather)}")
 
-    # ── guard ─────────────────────────────────────────────────────────────────
+    # ── guard: no active props ────────────────────────────────────────────────
     if odds_df.empty:
         print(
-            "\n[process_model] ABORT — odds_props.json produced no usable rows.\n"
-            "  Checklist:\n"
-            "    1. python fetch_all_data.py --streams odds\n"
-            "    2. Confirm ODDS_API_KEY is set in .env\n"
-            "    3. Verify MLB games are scheduled today"
+            f"\n[process_model] No active props found for {target_date}. "
+            f"Proceeding with historical analysis only.\n"
+            f"  (To fetch fresh props: python fetch_all_data.py --streams odds)"
         )
-        return pd.DataFrame()
+        # return pd.DataFrame()  ← disabled: pipeline continues to golden.csv +
+        # summary JSON even without live props (historical-only mode)
 
     # ── feature engineering ───────────────────────────────────────────────────
     print("  Engineering features…")
@@ -765,9 +878,31 @@ def run(target_date: str) -> pd.DataFrame:
         iso_str = ", ".join(f"{t}={v:.3f}" for t, v in top_iso)
         print(f"  ISO (top 5 teams): {iso_str}")
 
+    # historical h2h_df (2025+2026) drives all feature calculations (ISO, BvP, etc.)
     odds_df = engineer_features(odds_df, h2h_df)
     odds_df = apply_park_and_wind(odds_df, weather)
     odds_df = compute_final_edge(odds_df)
+
+    # ── resolve home_team / away_team / venue from current_season_h2h ────────
+    # current_season_h2h is filtered to 2026 + target_date, so every home_team
+    # maps to exactly one opponent — no cross-year collisions possible.
+    # If current_season_h2h is empty (warning already printed above) we skip
+    # the merge and keep whatever home/away values came from the Odds API.
+    if not current_season_h2h.empty and "home_team" in odds_df.columns:
+        available_venue_cols = [
+            c for c in ("away_team", "venue")
+            if c in current_season_h2h.columns
+        ]
+        if available_venue_cols:
+            venue_lookup = (
+                current_season_h2h[["home_team"] + available_venue_cols]
+                .drop_duplicates(subset=["home_team"])
+            )
+            # remove stale away_team / venue from odds_df before re-merging
+            stale_cols = [c for c in available_venue_cols if c in odds_df.columns]
+            if stale_cols:
+                odds_df = odds_df.drop(columns=stale_cols)
+            odds_df = odds_df.merge(venue_lookup, on="home_team", how="left")
 
     # ── merge Kalshi implied probability ──────────────────────────────────────
     if not kalshi_df.empty:
@@ -813,29 +948,51 @@ def run(target_date: str) -> pd.DataFrame:
     top10_cols = ["event_id", "player", "market", "line",
                   "no_vig_over_prob", "model_prob", "edge",
                   "iso_adj", "park_wind_mult", "home_team"]
-    summary = {
-        "date":               target_date,
-        "total_props":        len(odds_df),
-        "qualifying_ev_08":   int((odds_df["edge"] >= EV_THRESHOLD).sum()),
-        "markets_seen":       sorted(odds_df["market"].unique().tolist()),
-        "avg_model_prob":     round(float(odds_df["model_prob"].mean()), 4),
-        "avg_edge":           round(float(odds_df["edge"].mean()), 4),
-        "avg_iso_adj":        round(float(odds_df["iso_adj"].mean()), 5),
-        "top_edges": (
-            odds_df.nlargest(10, "edge")[
-                [c for c in top10_cols if c in odds_df.columns]
-            ].to_dict(orient="records")
-        ),
-        "h2h_seasons":        sorted(h2h_df["season"].unique().tolist()) if not h2h_df.empty else [],
-        "kalshi_markets":     int(kalshi_df["market_ticker"].nunique()) if not kalshi_df.empty else 0,
-        "team_iso":           {k: round(v, 4) for k, v in iso_map.items()},
-    }
+
+    if not odds_df.empty:
+        summary = {
+            "date":               target_date,
+            "total_props":        len(odds_df),
+            "qualifying_ev_08":   int((odds_df["edge"] >= EV_THRESHOLD).sum()),
+            "markets_seen":       sorted(odds_df["market"].unique().tolist()),
+            "avg_model_prob":     round(float(odds_df["model_prob"].mean()), 4),
+            "avg_edge":           round(float(odds_df["edge"].mean()), 4),
+            "avg_iso_adj":        round(float(odds_df["iso_adj"].mean()), 5),
+            "top_edges": (
+                odds_df.nlargest(10, "edge")[
+                    [c for c in top10_cols if c in odds_df.columns]
+                ].to_dict(orient="records")
+            ),
+            "h2h_seasons":        sorted(h2h_df["season"].unique().tolist()) if not h2h_df.empty else [],
+            "kalshi_markets":     int(kalshi_df["market_ticker"].nunique()) if not kalshi_df.empty else 0,
+            "team_iso":           {k: round(v, 4) for k, v in iso_map.items()},
+        }
+    else:
+        # historical-only mode — no live props, write a minimal summary so
+        # downstream tools (generate_dashboard, picks_history) don't crash
+        summary = {
+            "date":             target_date,
+            "total_props":      0,
+            "qualifying_ev_08": 0,
+            "markets_seen":     [],
+            "avg_model_prob":   0.0,
+            "avg_edge":         0.0,
+            "avg_iso_adj":      0.0,
+            "top_edges":        [],
+            "h2h_seasons":      sorted(h2h_df["season"].unique().tolist()) if not h2h_df.empty else [],
+            "kalshi_markets":   0,
+            "team_iso":         {k: round(v, 4) for k, v in iso_map.items()},
+        }
+
     summary_path = PROCESSED_DIR / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, default=str))
     print(f"  → Summary JSON: {summary_path}")
 
-    # ── Top 5 terminal table ──────────────────────────────────────────────────
-    print_top5_edges(odds_df, target_date)
+    # ── Top 5 terminal table (only when live props exist) ─────────────────────
+    if not odds_df.empty:
+        print_top5_edges(odds_df, target_date)
+    else:
+        print(f"  [historical mode] No props to rank — H2H ISO computed for {len(iso_map)} teams.")
 
     return odds_df
 

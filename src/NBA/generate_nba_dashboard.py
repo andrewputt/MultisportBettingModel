@@ -18,17 +18,17 @@ from pathlib import Path
 
 import pandas as pd
 
-PROPS_TODAY   = Path("src/NBA/data/props_edges_today.csv")
-ODDS_CACHE    = Path("src/NBA/data/odds_cache.json")
-TEMPLATE      = Path("dashboard_template.html")
-DEFAULT_OUT   = Path("dashboard.html")
+PROPS_TODAY      = Path("src/NBA/data/props_edges_today.csv")
+MONEYLINES_TODAY = Path("src/NBA/data/predictions_today.csv")
+ODDS_CACHE       = Path("src/NBA/data/odds_cache.json")
+TEMPLATE         = Path("dashboard_template.html")
+DEFAULT_OUT      = Path("dashboard.html")
 
 STAT_TO_MARKET = {
     "PTS":  "Points",
     "REB":  "Rebounds",
     "AST":  "Assists",
     "FG3M": "Threes",
-    "STL":  "Steals",
     "BLK":  "Blocks",
     "DD":   "Double-Double",
     "TD":   "Triple-Double",
@@ -84,7 +84,9 @@ def to_js_obj(d: dict) -> str:
     """Serialize a Python dict to a JavaScript object literal (not JSON — no quotes on keys)."""
     parts = []
     for k, v in d.items():
-        if isinstance(v, bool):
+        if v is None:
+            parts.append(f"{k}: null")
+        elif isinstance(v, bool):
             parts.append(f"{k}: {'true' if v else 'false'}")
         elif isinstance(v, str):
             escaped = v.replace("\\", "\\\\").replace('"', '\\"')
@@ -153,6 +155,10 @@ def build_nba_edges(df: pd.DataFrame, min_edge: float, game_times: dict) -> list
             "steam":     steam_obj(),
             "restDays":  int(round(float(r.get("rest_days", 2)))),
             "seriesGame": int(r.get("game_in_series", 0)),
+            "predStat":  round(float(r.get("pred_stat", 0)), 1),
+            "lineupAdj": round(float(r.get("lineup_adj", 0)), 1),
+            "oppDef":    round(float(r.get("opp_def_l10", 0)), 1),
+            "stat":      stat,
         }
         rows.append(row)
     return rows
@@ -165,7 +171,82 @@ def rows_to_js(rows: list[dict]) -> str:
     return "[\n" + ",\n".join(parts) + "\n  ]"
 
 
-def inject_into_template(html: str, nba_js: str, today: str) -> str:
+def build_moneyline_rows(game_times: dict) -> list[dict]:
+    """Read predictions_today.csv and build moneyline rows for NBA_EDGES."""
+    if not MONEYLINES_TODAY.exists():
+        return []
+    df = pd.read_csv(MONEYLINES_TODAY)
+    if df.empty:
+        return []
+
+    # Only include edges in 3-18% range. Larger gaps are Kalshi illiquidity
+    # (their NBA moneyline markets are thin and can misprice by 20%+), not
+    # genuine model signal.
+    df = df[(df["EDGE"] >= 0.03) & (df["EDGE"] <= 0.18)].copy()
+    df = df.sort_values("EDGE", ascending=False).reset_index(drop=True)
+
+    rows = []
+    seen_games = set()  # one pick per game (the best edge side)
+    for _, r in df.iterrows():
+        matchup = str(r.get("MATCHUP", ""))
+        if matchup in seen_games:
+            continue
+        seen_games.add(matchup)
+
+        abb      = str(r.get("ABB", ""))
+        is_home  = bool(r.get("IS_HOME", 0))
+        book_pct = round(float(r.get("KALSHI_IMPLIED", 0)) * 100, 1)
+        model_pct = round(float(r.get("INJ_ADJUSTED_PROB", r.get("MODEL_PROB", 0))) * 100, 1)
+        edge_pct  = round(float(r.get("EDGE", 0)) * 100, 1)
+
+        # Parse opponent from MATCHUP e.g. "Oklahoma City @ LA Lakers"
+        parts = matchup.split(" @ ")
+        if len(parts) == 2:
+            away_full, home_full = parts[0].strip(), parts[1].strip()
+            opp_full = home_full if not is_home else away_full
+            # Shorten to 3-letter abbrev — MATCHUP uses short city names ("New York") so
+            # match against the start of the full name ("New York Knicks")
+            opp_abb = next((k for k, v in TEAM_FULL.items() if v.startswith(opp_full)), opp_full[:3].upper())
+        else:
+            opp_abb = "OPP"
+
+        opp_str = f"vs {opp_abb}" if is_home else f"@ {opp_abb}"
+
+        # Use ABB pair as game_times key
+        game_time = ""
+        for key, val in game_times.items():
+            if abb in key and opp_abb in key:
+                game_time = val
+                break
+
+        rank = len(rows)
+        rows.append({
+            "id":        f"nba-ml-{rank+1}",
+            "player":    TEAM_FULL.get(abb, abb),
+            "team":      abb,
+            "opp":       opp_str,
+            "gameTime":  game_time,
+            "market":    "Moneyline",
+            "line":      0,
+            "side":      "WIN",
+            "book":      book_pct,
+            "model":     model_pct,
+            "edge":      edge_pct,
+            "highlight": rank < 2,
+            "fatigue":   {"b2b": False, "restDays": 2, "label": "—"},
+            "steam":     steam_obj(),
+            "restDays":  2,
+            "seriesGame": 0,
+            "starsOut":   int(r.get("STARS_OUT", 0)),
+            "predStat":   None,
+            "lineupAdj":  None,
+            "oppDef":     None,
+            "stat":       None,
+        })
+    return rows
+
+
+def inject_into_template(html: str, nba_js: str, today: str, scanned: int) -> str:
     # Replace the NBA_EDGES array
     html = re.sub(
         r"const NBA_EDGES\s*=\s*\[\];",
@@ -179,10 +260,17 @@ def inject_into_template(html: str, nba_js: str, today: str) -> str:
         html,
         flags=re.DOTALL,
     )
-    # Update NBA markets to include Steals and Blocks if present
+    # Update NBA scanned count with real market count
+    html = re.sub(
+        r'(NBA:.*?scanned:\s*)\d+',
+        rf'\g<1>{scanned}',
+        html,
+        flags=re.DOTALL,
+    )
+    # Update NBA markets filter to include Moneyline
     html = re.sub(
         r'(NBA:.*?markets:\s*)\[[^\]]*\]',
-        r'\1["All Markets", "Points", "Rebounds", "Assists", "Threes", "Steals", "Blocks"]',
+        r'\1["All Markets", "Moneyline", "Threes", "Blocks"]',
         html,
         flags=re.DOTALL,
     )
@@ -204,13 +292,25 @@ def main(min_edge: float = 0.05, out_path: Path = DEFAULT_OUT):
 
     game_times = build_game_times()
 
-    rows = build_nba_edges(df, min_edge, game_times)
-    print(f"Built {len(rows)} NBA rows (edge >= {min_edge*100:.0f}%)")
+    prop_rows = build_nba_edges(df, min_edge, game_times)
+    print(f"Built {len(prop_rows)} prop rows (edge >= {min_edge*100:.0f}%)")
 
-    nba_js = rows_to_js(rows)
-    today  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    html   = TEMPLATE.read_text(encoding="utf-8")
-    html   = inject_into_template(html, nba_js, today)
+    ml_rows = build_moneyline_rows(game_times)
+    print(f"Built {len(ml_rows)} moneyline rows")
+
+    # Moneylines first, then props — highlight only the top 5 across both
+    rows = ml_rows + prop_rows
+    for i, row in enumerate(rows):
+        row["highlight"] = i < 5
+    nba_js  = rows_to_js(rows)
+    today   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Total markets evaluated = all rows in props file + moneylines from predictions file
+    ml_count = 0
+    if MONEYLINES_TODAY.exists():
+        ml_count = len(pd.read_csv(MONEYLINES_TODAY))
+    scanned = len(df) + ml_count
+    html    = TEMPLATE.read_text(encoding="utf-8")
+    html    = inject_into_template(html, nba_js, today, scanned)
 
     out_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved → {out_path}")

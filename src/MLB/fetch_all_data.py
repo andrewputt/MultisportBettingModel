@@ -23,7 +23,7 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -153,7 +153,12 @@ KALSHI_SERIES      = "KXMLBGAME"
 
 ODDS_SPORT         = "baseball_mlb"
 ODDS_REGIONS       = "us"
-ODDS_MARKETS       = "pitcher_strikeouts,batter_hits,batter_total_bases,pitcher_outs_recorded"
+# pitcher_outs_recorded is NOT a valid Odds API market key — it causes a 422
+# for the entire request (the API rejects the call rather than ignoring the bad key).
+# Valid MLB player-prop markets confirmed against the live API:
+#   pitcher_strikeouts, batter_total_bases, batter_hits
+# pitcher_outs is intentionally excluded: the API returns it inconsistently.
+ODDS_MARKETS       = "pitcher_strikeouts,batter_total_bases,batter_hits"
 ODDS_BOOKMAKERS    = "draftkings,fanduel,betmgm,caesars"
 
 PYBASEBALL_TEAMS   = [
@@ -193,25 +198,8 @@ def _kalshi_headers() -> dict:
 
 
 def fetch_kalshi(output_path: Path) -> None:
-    """
-    Fetch today's open KXMLBGAME markets and extract implied win probability
-    (yes_ask) directly from the market object.
-
-    Output JSON schema (one entry per market):
-      {
-        "ticker":       "KXMLBGAME-26-LAD-ARI-20260430",
-        "title":        "LAD vs ARI - Apr 30",
-        "yes_ask":      0.54,   // implied home-team win probability [0–1]
-        "yes_bid":      0.52,
-        "close_time":   "2026-04-30T23:05:00Z",
-        "open_time":    "2026-04-30T12:00:00Z",
-        "status":       "open",
-        "volume":       1234
-      }
-
-    No per-market HTTP calls — everything comes from the single list response.
-    """
     today_str = date.today().isoformat()   # e.g. "2026-04-30"
+    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
     print(f"[fetch_all_data] Stream 1 — Kalshi today's markets ({today_str})…")
 
     params = {
@@ -254,7 +242,7 @@ def fetch_kalshi(output_path: Path) -> None:
             return ct[:10]
         return ""
 
-    today_markets = [m for m in all_open if _market_date(m) == today_str]
+    today_markets = [m for m in all_open if _market_date(m) in [today_str, tomorrow_str]]
     print(f"    {len(today_markets)} markets closing today")
 
     # ── Extract implied probability from market object ────────────────────────
@@ -346,15 +334,22 @@ def _fetch_event_player_props(event_id: str) -> tuple[list[dict], str, str, int,
     """
     Fetch player props for a single event.
     Returns (bookmakers, home_team, away_team, credits_used, credits_remaining).
+
+    NOTE: Do NOT pass 'bookmakers' here.
+    The Odds API treats 'bookmakers' and 'regions' as mutually exclusive filters.
+    If you specify bookmakers=draftkings,fanduel,...  the API returns ONLY those
+    four books — and if none of them have posted lines yet (which is common early
+    in the day) you get an empty bookmakers list for every event.
+    Using regions=us returns any US-region book that has posted props, so you get
+    results as soon as even one book opens lines.
     """
     url    = f"{ODDS_BASE_URL}/sports/{ODDS_SPORT}/events/{event_id}/odds"
     params = {
         "apiKey":      ODDS_API_KEY,
-        "regions":     ODDS_REGIONS,
+        "regions":     ODDS_REGIONS,   # 'us' — any US-region bookmaker
         "markets":     ODDS_MARKETS,
-        "bookmakers":  ODDS_BOOKMAKERS,
         "dateFormat":  "iso",
-        "oddsFormat":  "american",
+        "oddsFormat":  "decimal",      # confirmed format from live API (1.94, 1.8, etc.)
     }
     resp = requests.get(url, params=params, timeout=15)
     if resp.status_code == 422:
@@ -481,24 +476,94 @@ def _build_h2h(season: int) -> pd.DataFrame:
     return combined
 
 
+def _update_h2h_2026(output_dir):
+    import pandas as pd
+    import numpy as np
+    import time
+    import io
+    from curl_cffi.requests import Session as CurlSession
+
+    teams = ['NYY','BOS','LAD','CHC','SFG','HOU','ATL','PHI','COL','MIN','NYM','CLE',
+             'SEA','TEX','DET','MIL','STL','CIN','PIT','ARI','MIA','WSN','BAL','TOR',
+             'LAA','TBR','SDP','KCR','CHW','ATH'] # <-- Changed OAK to ATH
+    
+    all_teams_data = []
+    print(f"[pybaseball] Fluidly fetching 2026 season for {len(teams)} teams (Bypass Mode)...")
+
+    # Use curl_cffi to bypass Cloudflare blockades
+    session = CurlSession(impersonate="chrome110")
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+    })
+
+    for team in teams:
+        try:
+            print(f"  Scraping {team}...")
+            url = f"https://www.baseball-reference.com/teams/{team}/2026-schedule-scores.shtml"
+            resp = session.get(url, timeout=15)
+            
+            # Parse HTML directly with Pandas to avoid pybaseball bugs
+            tables = pd.read_html(io.StringIO(resp.text))
+            df = tables[0].copy()
+            
+            # Clean up the table headers
+            df.columns = [str(c).replace('*', '') for c in df.columns]
+            if 'Gm#' in df.columns:
+                df = df[df['Gm#'] != 'Gm#'].copy()  # Remove mid-table repeating headers
+            
+            # Safely handle the dreaded 'Unknown' attendance
+            if 'Attendance' in df.columns:
+                df['Attendance'] = pd.to_numeric(
+                    df['Attendance'].astype(str).str.replace(',', '').replace('Unknown', np.nan), 
+                    errors='coerce'
+                )
+            
+            # Standardize column names for your model
+            df.columns = [str(c).lower().replace('.', '').replace('/', '_') for c in df.columns]
+            df['team'] = team
+            df['season'] = 2026
+            
+            all_teams_data.append(df)
+            time.sleep(1.5) # Be polite to the server
+            
+        except Exception as e:
+            print(f"  Failed for {team}: {e}")
+
+    if all_teams_data:
+        full_2026 = pd.concat(all_teams_data, ignore_index=True)
+        # Deduplicate
+        if 'date' in full_2026.columns and 'opp' in full_2026.columns:
+            full_2026 = full_2026.drop_duplicates(subset=['date', 'team', 'opp'])
+        
+        file_path = output_dir / "h2h_2026.csv"
+        full_2026.to_csv(file_path, index=False)
+        print(f"\n[pybaseball] ✓ Fluid Sync Complete. Total rows: {len(full_2026)}")
+
+
 def fetch_pybaseball(output_dir: Path) -> None:
     """
-    Build and save H2H CSVs for 2025 and 2026 (YTD).
+    H2H log strategy:
+      • 2025 — fetch once and cache; skip if h2h_2025.csv already exists.
+      • 2026 — fetch all data gracefully handling bad B-Ref data
     """
     print("[fetch_all_data] Stream 3 — pybaseball H2H logs…")
     pybaseball.cache.enable()
-    current_year = 2026
 
-    for season in [2025, current_year]:
-        print(f"  Season {season}:")
-        df = _build_h2h(season)
-        if df.empty:
-            print(f"    No data returned for {season}.")
-            continue
-        out_path = output_dir / f"h2h_{season}.csv"
-        df.to_csv(out_path, index=False)
-        print(f"  → {len(df)} rows saved to {out_path}")
+    # ── 2025: skip if already on disk ────────────────────────────────────────
+    path_2025 = output_dir / "h2h_2025.csv"
+    if path_2025.exists():
+        print(f"  2025: h2h_2025.csv already exists ({path_2025.stat().st_size // 1024} KB) — skipping.")
+    else:
+        print("  2025: file not found — fetching full season (one-time)…")
+        df_2025 = _build_h2h(2025)
+        if df_2025.empty:
+            print("    No data returned for 2025.")
+        else:
+            df_2025.to_csv(path_2025, index=False)
+            print(f"  → {len(df_2025)} rows saved to {path_2025}")
 
+    # ── 2026: self-healing full sync ─────────────────────────────────────────
+    _update_h2h_2026(output_dir)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT

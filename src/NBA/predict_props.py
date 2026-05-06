@@ -67,7 +67,6 @@ ODDS_STAT_MAP = {
     "player_rebounds": "REB",
     "player_assists":  "AST",
     "player_threes":   "FG3M",
-    "player_steals":   "STL",
     "player_blocks":   "BLK",
 }
 
@@ -84,7 +83,7 @@ TEAM_FULL_TO_ABB = {
     "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
 }
 
-PROP_STATS = ["PTS", "REB", "AST", "FG3M", "STL", "BLK"]   # model stat keys
+PROP_STATS = ["PTS", "REB", "AST", "FG3M", "BLK"]
 
 COMBO_SERIES = {
     "DD": "KXNBA2D",
@@ -148,17 +147,21 @@ def build_team_context(team_logs: pd.DataFrame) -> dict:
         if pd.isna(opp_ast): opp_ast = 25.0
         if pd.isna(opp_reb): opp_reb = 44.0
         po_grp  = grp[grp["IS_PLAYOFF"] == 1]
-        game_in_s = 0
+        game_in_s  = 0
+        series_w   = 0
         if not po_grp.empty:
-            last_opp      = last.get("OPP_TEAM", "")
-            series_games  = po_grp[po_grp["OPP_TEAM"] == last_opp]
-            game_in_s     = len(series_games) + 1
+            last_opp     = last.get("OPP_TEAM", "")
+            series_games = po_grp[po_grp["OPP_TEAM"] == last_opp]
+            game_in_s    = len(series_games) + 1
+            if "WL" in series_games.columns:
+                series_w = int((series_games["WL"] == "W").sum())
         ctx[team] = {
             "rest_days":      float(rest),
             "opp_def_l10":    opp_def,
             "opp_ast_l10":    opp_ast,
             "opp_reb_l10":    opp_reb,
             "game_in_series": int(game_in_s),
+            "series_wins":    series_w,
         }
     return ctx
 
@@ -590,11 +593,13 @@ def fetch_recent_logs(player_id: int, n: int = 25) -> pd.DataFrame:
 def build_live_features(is_home: int, is_playoff: int, rest_days: float,
                         opp_def_l10: float, game_in_series: int,
                         hist_df: pd.DataFrame, feat_cols: list,
-                        series_form: dict | None = None) -> dict:
+                        series_form: dict | None = None,
+                        series_wins: int = 0) -> dict:
     row = {
         "IS_HOME":            is_home,
         "IS_PLAYOFF":         is_playoff,
         "GAME_IN_SERIES":     game_in_series,
+        "SERIES_WINS":        series_wins,
         "REST_DAYS":          rest_days,
         "SEASON_NUM":         SEASON_NUM,
         "OPP_DEF_RATING_L10": opp_def_l10,
@@ -604,7 +609,7 @@ def build_live_features(is_home: int, is_playoff: int, rest_days: float,
     col_map = {
         "PTS": "PTS", "REB": "REB", "AST": "AST",
         "FG3M": "FG3M", "STL": "STL", "BLK": "BLK",
-        "MIN": "MIN", "FGA": "FGA", "TOV": "TOV",
+        "MIN": "MIN", "FGA": "FGA", "TOV": "TOV", "FTA": "FTA",
     }
     for api_col, feat_prefix in col_map.items():
         if api_col not in hist_df.columns:
@@ -628,10 +633,38 @@ def build_live_features(is_home: int, is_playoff: int, rest_days: float,
                 if key in row and not pd.isna(row.get(key, float("nan"))):
                     row[key] = w * s_avg + (1 - w) * row[key]
 
+    # Derive USG_L10 from components (ball-handling burden feature)
+    if "USG_L10" in feat_cols:
+        fga = row.get("FGA_L10") or 0.0
+        fta = row.get("FTA_L10") or 0.0
+        tov = row.get("TOV_L10") or 0.0
+        row["USG_L10"] = fga + 0.44 * fta + tov
+
     return row
 
 
 # ── Model helpers ──────────────────────────────────────────────────────────────
+
+def load_bias_corrections() -> dict[str, float]:
+    """
+    Per-stat additive bias from scored predictions: mean(actual - pred_stat).
+    Applied before probability calculation to remove systematic over/under-prediction.
+    """
+    scored_path = DATA_DIR / "props_scored.csv"
+    if not scored_path.exists():
+        return {}
+    df = pd.read_csv(scored_path)
+    df["actual_stat"] = pd.to_numeric(df["actual_stat"], errors="coerce")
+    df["pred_stat"]   = pd.to_numeric(df["pred_stat"],   errors="coerce")
+    df = df.dropna(subset=["actual_stat", "pred_stat"])
+    corrections = {}
+    for stat, grp in df.groupby("stat"):
+        if len(grp) >= 20:
+            corrections[stat] = float((grp["actual_stat"] - grp["pred_stat"]).mean())
+    if corrections:
+        print(f"  Bias corrections loaded: { {k: round(v,2) for k,v in corrections.items()} }")
+    return corrections
+
 
 def load_model(stat: str):
     path = MODEL_DIR / f"props_{stat}.pkl"
@@ -646,14 +679,16 @@ def get_std(mdl: dict, player_name: str, is_playoff: bool = False) -> float:
     Blended std: 40% per-player, 60% global residual.
     Per-player stds are computed from as few as 8 holdout games and are
     unreliable when small — blending prevents extreme overconfidence.
-    Playoff multiplier raised to 2.0× (from 1.5×): tighter defense, scheme
-    adjustments, and higher variance in series basketball all widen true spread.
+    Playoff multiplier set to 3.5×: tighter defense, scheme adjustments,
+    role changes between series games, and small sample sizes in a 7-game
+    series all create substantially higher real-world variance than the
+    residual std from regular-season training captures.
     """
     player_std  = mdl["player_std"].get(player_name, mdl["residual_std"])
     global_std  = mdl["residual_std"]
     std = 0.4 * player_std + 0.6 * global_std
     if is_playoff:
-        std *= 2.0
+        std *= 3.5
     return std
 
 
@@ -811,11 +846,12 @@ def run(game_id: str | None, min_edge: float, use_cache: bool = False):
                        "NOV":"11","DEC":"12"}
             game_date = f"20{m.group(1)}-{mon_map.get(m.group(2),'01')}-{m.group(3)}"
 
-    # ── Load models
+    # ── Load models + bias corrections
     models  = {stat: load_model(stat) for stat in PROP_STATS}
     missing = [s for s, mdl in models.items() if mdl is None]
     if missing:
         print(f"Warning: no model for {missing} — run train_props_model.py first")
+    bias_corrections = load_bias_corrections()
 
     # ── Player log cache
     log_cache: dict[str, pd.DataFrame] = {}
@@ -855,6 +891,7 @@ def run(game_id: str | None, min_edge: float, use_cache: bool = False):
         rest_days    = p_ctx.get("rest_days", 2.0)
         opp_def      = opp_ctx.get("opp_def_l10", 110.0)
         game_in_s    = p_ctx.get("game_in_series", 1)
+        series_w     = p_ctx.get("series_wins", 0)
         is_playoff   = 1
 
         # Fix 1: series-specific form for this opponent
@@ -877,16 +914,22 @@ def run(game_id: str | None, min_edge: float, use_cache: bool = False):
             feat_cols = mdl["features"]
             feat_vec  = build_live_features(
                 is_home, is_playoff, rest_days, opp_def, game_in_s,
-                hist, feat_cols, series_form,
+                hist, feat_cols, series_form, series_wins=series_w,
             )
-            X = pd.DataFrame([feat_vec])[feat_cols]
+            X = pd.DataFrame([feat_vec]).reindex(columns=feat_cols)
             if X.isnull().any().any():
                 continue
 
-            pred_raw  = float(mdl["model"].predict(X.values)[0])
+            pred_raw   = float(mdl["model"].predict(X.values)[0])
+            # Apply bias correction only to the display value, not the probability.
+            # Applying it to the probability inflates edges artificially (a -1.5 AST
+            # correction shifts the predicted mean far from the line, which the normal
+            # CDF converts into massive "edges" that don't hold up in practice).
+            pred_display = pred_raw + bias_corrections.get(stat, 0.0)
             # Fix 3: opponent stat-specific defense (AST/REB only)
-            pred_raw  = apply_opp_stat_correction(pred_raw, stat, opp_ctx)
-            pred_stat = apply_lineup_adjustment(pred_raw, stat, p_team, lineup_ctx)
+            pred_raw   = apply_opp_stat_correction(pred_raw, stat, opp_ctx)
+            pred_stat  = apply_lineup_adjustment(pred_raw, stat, p_team, lineup_ctx)
+            pred_display = apply_lineup_adjustment(pred_display, stat, p_team, lineup_ctx)
             # Fix 2: widen std in playoffs
             std        = get_std(mdl, player_name, is_playoff=bool(is_playoff))
             model_prob = prob_exceed(threshold, pred_stat, std)
@@ -914,8 +957,8 @@ def run(game_id: str | None, min_edge: float, use_cache: bool = False):
                 "threshold":      threshold,
                 "yes_ask":        yes_ask,
                 "model_prob":     round(model_prob, 3),
-                "pred_stat":      round(pred_stat, 1),
-                "lineup_adj":     round(pred_stat - pred_raw, 2),
+                "pred_stat":      round(pred_display, 1),
+                "lineup_adj":     round(pred_display - pred_raw, 2),
                 "edge":           round(best_edge, 3),
                 "direction":      direction,
                 "kelly":          kelly,

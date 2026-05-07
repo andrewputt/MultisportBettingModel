@@ -246,7 +246,8 @@ def build_moneyline_rows(game_times: dict) -> list[dict]:
     return rows
 
 
-def inject_into_template(html: str, nba_js: str, today: str, scanned: int) -> str:
+def inject_into_template(html: str, nba_js: str, today: str, scanned: int,
+                         markets: list[str] | None = None) -> str:
     # Replace the NBA_EDGES array
     html = re.sub(
         r"const NBA_EDGES\s*=\s*\[\];",
@@ -267,13 +268,15 @@ def inject_into_template(html: str, nba_js: str, today: str, scanned: int) -> st
         html,
         flags=re.DOTALL,
     )
-    # Update NBA markets filter to include Moneyline
-    html = re.sub(
-        r'(NBA:.*?markets:\s*)\[[^\]]*\]',
-        r'\1["All Markets", "Moneyline", "Threes", "Blocks"]',
-        html,
-        flags=re.DOTALL,
-    )
+    # Update NBA markets filter dynamically from actual data
+    if markets:
+        markets_js = json.dumps(markets)
+        html = re.sub(
+            r'(NBA:.*?markets:\s*)\[[^\]]*\]',
+            rf'\1{markets_js}',
+            html,
+            flags=re.DOTALL,
+        )
     return html
 
 
@@ -309,8 +312,14 @@ def main(min_edge: float = 0.05, out_path: Path = DEFAULT_OUT):
     if MONEYLINES_TODAY.exists():
         ml_count = len(pd.read_csv(MONEYLINES_TODAY))
     scanned = len(df) + ml_count
+
+    # Build markets filter list from actual data so all stat tabs are visible
+    market_order = ["All Markets", "Moneyline", "Points", "Rebounds", "Assists", "Threes", "Blocks", "Double-Double", "Triple-Double"]
+    active_markets = {r["market"] for r in rows}
+    markets = [m for m in market_order if m == "All Markets" or m in active_markets]
+
     html    = TEMPLATE.read_text(encoding="utf-8")
-    html    = inject_into_template(html, nba_js, today, scanned)
+    html    = inject_into_template(html, nba_js, today, scanned, markets)
 
     out_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved → {out_path}")

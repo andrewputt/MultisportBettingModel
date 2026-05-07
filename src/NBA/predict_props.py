@@ -1097,7 +1097,11 @@ def run(game_id: str | None, min_edge: float, use_cache: bool = False):
             continue
         print(f"  ── {'Individual Props' if mtype=='PROP' else 'Combo Props (DD/TD)'} ──")
         for _, r in section.iterrows():
-            line_str = f"{r['threshold']:.0f}" if r["stat"] not in ("DD","TD") else "—"
+            if r["stat"] in ("DD", "TD"):
+                line_str = "—"
+            else:
+                t = float(r["threshold"])
+                line_str = f"{t + 0.5:.1f}" if t == int(t) else f"{t}"
             print(
                 f"  {r['player']:<20} {mtype:<5} {r['stat']:<5} {line_str:>5} "
                 f"{r['yes_ask']:>8.3f} {r['model_prob']:>7.3f} {str(r['pred_stat']):>8} "

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=1440" />
-    <title>Dialed</title>
+    <title>EdgeModel</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -243,27 +243,23 @@
 
       // ── NBA: replace this empty array with your pipeline output ──────
       const NBA_EDGES = [
-    {id: "nba-ml-1", player: "Minnesota Timberwolves", team: "MIN", opp: "vs SAS", gameTime: "2026-05-07T01:40:00Z", market: "Moneyline", line: 0, side: "WIN", book: 42.0, model: 59.4, edge: 17.4, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 1, predStat: null, lineupAdj: null, oppDef: null, stat: null},
-    {id: "nba-ml-2", player: "Philadelphia 76ers", team: "PHI", opp: "vs NYK", gameTime: "2026-05-06T23:10:00Z", market: "Moneyline", line: 0, side: "WIN", book: 38.0, model: 55.0, edge: 17.0, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 0, predStat: null, lineupAdj: null, oppDef: null, stat: null},
-    {id: "nba-ml-3", player: "Minnesota Timberwolves", team: "MIN", opp: "@ SAS", gameTime: "2026-05-07T01:40:00Z", market: "Moneyline", line: 0, side: "WIN", book: 23.0, model: 37.6, edge: 14.6, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 1, predStat: null, lineupAdj: null, oppDef: null, stat: null},
-    {id: "nba-ml-4", player: "Los Angeles Lakers", team: "LAL", opp: "vs OKC", gameTime: "2026-05-08T01:40:00Z", market: "Moneyline", line: 0, side: "WIN", book: 29.0, model: 43.4, edge: 14.4, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 0, predStat: null, lineupAdj: null, oppDef: null, stat: null},
-    {id: "nba-ml-5", player: "Cleveland Cavaliers", team: "CLE", opp: "@ DET", gameTime: "2026-05-07T23:10:00Z", market: "Moneyline", line: 0, side: "WIN", book: 41.0, model: 45.3, edge: 4.3, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 0, predStat: null, lineupAdj: null, oppDef: null, stat: null},
-    {id: "nba-ml-6", player: "Cleveland Cavaliers", team: "CLE", opp: "vs DET", gameTime: "2026-05-07T23:10:00Z", market: "Moneyline", line: 0, side: "WIN", book: 56.0, model: 59.9, edge: 3.9, highlight: false, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 0, predStat: null, lineupAdj: null, oppDef: null, stat: null},
-    {id: "nba-1", player: "Tyrese Maxey", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:10:00Z", market: "Assists", line: 5.5, side: "UNDER", book: 57.5, model: 44.4, edge: 13.2, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 3.3, lineupAdj: -1.3, oppDef: 101.8, stat: "AST"},
-    {id: "nba-2", player: "Tyrese Maxey", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:10:00Z", market: "Points", line: 26.5, side: "UNDER", book: 53.9, model: 41.5, edge: 12.5, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 20.3, lineupAdj: -1.8, oppDef: 101.8, stat: "PTS"},
-    {id: "nba-3", player: "Luguentz Dort", team: "OKC", opp: "vs LAL", gameTime: "2026-05-08T01:40:00Z", market: "Rebounds", line: 2.5, side: "UNDER", book: 60.1, model: 47.9, edge: 12.1, highlight: false, fatigue: {b2b: true, restDays: 1, label: "B2B"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 1, seriesGame: 2, predStat: 1.0, lineupAdj: -1.1, oppDef: 99.8, stat: "REB"},
-    {id: "nba-4", player: "Ajay Mitchell", team: "OKC", opp: "vs LAL", gameTime: "2026-05-08T01:40:00Z", market: "Points", line: 15.5, side: "UNDER", book: 56.1, model: 44.3, edge: 11.8, highlight: false, fatigue: {b2b: true, restDays: 1, label: "B2B"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 1, seriesGame: 2, predStat: 10.8, lineupAdj: -1.8, oppDef: 99.8, stat: "PTS"},
-    {id: "nba-5", player: "Paul George", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:10:00Z", market: "Assists", line: 3.5, side: "UNDER", book: 52.9, model: 41.9, edge: 11.0, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 0.9, lineupAdj: -1.4, oppDef: 101.8, stat: "AST"},
-    {id: "nba-6", player: "Ajay Mitchell", team: "OKC", opp: "vs LAL", gameTime: "2026-05-08T01:40:00Z", market: "Assists", line: 3.5, side: "UNDER", book: 53.4, model: 43.1, edge: 10.3, highlight: false, fatigue: {b2b: true, restDays: 1, label: "B2B"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 1, seriesGame: 2, predStat: 1.1, lineupAdj: -1.3, oppDef: 99.8, stat: "AST"},
-    {id: "nba-7", player: "Rudy Gobert", team: "MIN", opp: "@ SAS", gameTime: "2026-05-07T01:40:00Z", market: "Rebounds", line: 10.5, side: "UNDER", book: 52.0, model: 42.0, edge: 10.0, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 7.7, lineupAdj: -1.1, oppDef: 108.7, stat: "REB"},
-    {id: "nba-8", player: "Devin Vassell", team: "SAS", opp: "vs MIN", gameTime: "2026-05-07T01:40:00Z", market: "Rebounds", line: 4.5, side: "OVER", book: 41.1, model: 51.0, edge: 9.9, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 3.8, lineupAdj: -0.9, oppDef: 113.9, stat: "REB"},
-    {id: "nba-9", player: "Victor Wembanyama", team: "SAS", opp: "vs MIN", gameTime: "2026-05-07T01:40:00Z", market: "Points", line: 26.5, side: "UNDER", book: 51.5, model: 41.7, edge: 9.8, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 20.5, lineupAdj: -1.8, oppDef: 113.9, stat: "PTS"},
-    {id: "nba-10", player: "Jalen Duren", team: "DET", opp: "vs CLE", gameTime: "2026-05-07T23:10:00Z", market: "Assists", line: 2.5, side: "OVER", book: 40.6, model: 50.3, edge: 9.7, highlight: false, fatigue: {b2b: true, restDays: 1, label: "B2B"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 1, seriesGame: 2, predStat: 1.0, lineupAdj: -1.6, oppDef: 112.8, stat: "AST"},
-    {id: "nba-11", player: "VJ Edgecombe", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:10:00Z", market: "Rebounds", line: 5.5, side: "OVER", book: 41.0, model: 50.1, edge: 9.2, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 4.7, lineupAdj: -0.8, oppDef: 101.8, stat: "REB"},
-    {id: "nba-12", player: "Karl-Anthony Towns", team: "NYK", opp: "vs PHI", gameTime: "2026-05-06T23:10:00Z", market: "Points", line: 19.5, side: "UNDER", book: 48.5, model: 39.4, edge: 9.1, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 12.2, lineupAdj: -1.8, oppDef: 105.9, stat: "PTS"},
-    {id: "nba-13", player: "Josh Hart", team: "NYK", opp: "vs PHI", gameTime: "2026-05-06T23:10:00Z", market: "Assists", line: 5.5, side: "UNDER", book: 42.6, model: 33.8, edge: 8.8, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 1.6, lineupAdj: -1.4, oppDef: 105.9, stat: "AST"},
-    {id: "nba-14", player: "Donovan Mitchell", team: "CLE", opp: "@ DET", gameTime: "2026-05-07T23:10:00Z", market: "Assists", line: 3.5, side: "UNDER", book: 56.4, model: 47.7, edge: 8.6, highlight: false, fatigue: {b2b: true, restDays: 1, label: "B2B"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 1, seriesGame: 2, predStat: 1.9, lineupAdj: -1.2, oppDef: 101.6, stat: "AST"},
-    {id: "nba-15", player: "Deandre Ayton", team: "LAL", opp: "@ OKC", gameTime: "2026-05-08T01:40:00Z", market: "Rebounds", line: 8.5, side: "UNDER", book: 49.6, model: 41.5, edge: 8.1, highlight: false, fatigue: {b2b: true, restDays: 1, label: "B2B"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 1, seriesGame: 2, predStat: 5.7, lineupAdj: -1.0, oppDef: 108.8, stat: "REB"}
+    {id: "nba-ml-1", player: "Minnesota Timberwolves", team: "MIN", opp: "vs SAS", gameTime: "2026-05-07T01:40:00Z", market: "Moneyline", line: 0, side: "WIN", book: 41.0, model: 56.8, edge: 15.8, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 1, predStat: null, lineupAdj: null, oppDef: null, stat: null},
+    {id: "nba-ml-2", player: "Cleveland Cavaliers", team: "CLE", opp: "@ DET", gameTime: "2026-05-07T23:10:00Z", market: "Moneyline", line: 0, side: "WIN", book: 41.0, model: 47.0, edge: 6.0, highlight: true, fatigue: {b2b: false, restDays: 2, label: "—"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 0, starsOut: 0, predStat: null, lineupAdj: null, oppDef: null, stat: null},
+    {id: "nba-1", player: "Andre Drummond", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:14:00Z", market: "Rebounds", line: 9.5, side: "UNDER", book: 44.4, model: 21.7, edge: 22.8, highlight: true, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 3.0, lineupAdj: 0.2, oppDef: 101.8, stat: "REB"},
+    {id: "nba-2", player: "Cade Cunningham", team: "CLE", opp: "@ DET", gameTime: "2026-05-07T23:10:00Z", market: "Assists", line: 9.5, side: "UNDER", book: 54.1, model: 31.6, edge: 22.5, highlight: true, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 7.2, lineupAdj: 0.6, oppDef: 101.6, stat: "AST"},
+    {id: "nba-3", player: "Josh Hart", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:14:00Z", market: "Rebounds", line: 8.5, side: "UNDER", book: 56.2, model: 42.9, edge: 13.3, highlight: true, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 7.4, lineupAdj: 0.4, oppDef: 101.8, stat: "REB"},
+    {id: "nba-4", player: "Ajay Mitchell", team: "LAL", opp: "@ OKC", gameTime: "2026-05-08T01:40:00Z", market: "Points", line: 15.5, side: "UNDER", book: 56.1, model: 43.7, edge: 12.4, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 12.3, lineupAdj: 0.0, oppDef: 108.8, stat: "PTS"},
+    {id: "nba-5", player: "Tyrese Maxey", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:14:00Z", market: "Assists", line: 5.5, side: "UNDER", book: 57.4, model: 45.4, edge: 12.0, highlight: false, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 5.0, lineupAdj: 0.2, oppDef: 101.8, stat: "AST"},
+    {id: "nba-6", player: "Luguentz Dort", team: "LAL", opp: "@ OKC", gameTime: "2026-05-08T01:40:00Z", market: "Rebounds", line: 2.5, side: "UNDER", book: 60.1, model: 48.4, edge: 11.7, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 2.2, lineupAdj: 0.1, oppDef: 108.8, stat: "REB"},
+    {id: "nba-7", player: "Ayo Dosunmu", team: "MIN", opp: "@ SAS", gameTime: "2026-05-07T01:40:00Z", market: "Points", line: 10.5, side: "OVER", book: 50.4, model: 61.9, edge: 11.5, highlight: false, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 16.7, lineupAdj: 0.0, oppDef: 108.7, stat: "PTS"},
+    {id: "nba-8", player: "Paul George", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:14:00Z", market: "Assists", line: 3.5, side: "UNDER", book: 52.7, model: 41.8, edge: 10.9, highlight: false, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 2.3, lineupAdj: 0.1, oppDef: 101.8, stat: "AST"},
+    {id: "nba-9", player: "Josh Hart", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:14:00Z", market: "Assists", line: 5.5, side: "UNDER", book: 42.6, model: 32.3, edge: 10.3, highlight: false, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 2.9, lineupAdj: 0.1, oppDef: 101.8, stat: "AST"},
+    {id: "nba-10", player: "Ajay Mitchell", team: "LAL", opp: "@ OKC", gameTime: "2026-05-08T01:40:00Z", market: "Assists", line: 3.5, side: "UNDER", book: 53.4, model: 43.7, edge: 9.7, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 2.6, lineupAdj: 0.0, oppDef: 108.8, stat: "AST"},
+    {id: "nba-11", player: "Karl-Anthony Towns", team: "PHI", opp: "@ NYK", gameTime: "2026-05-06T23:14:00Z", market: "Rebounds", line: 11.5, side: "UNDER", book: 52.5, model: 42.9, edge: 9.5, highlight: false, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 10.6, lineupAdj: 0.6, oppDef: 101.8, stat: "REB"},
+    {id: "nba-12", player: "Devin Vassell", team: "MIN", opp: "@ SAS", gameTime: "2026-05-07T01:40:00Z", market: "Rebounds", line: 4.5, side: "OVER", book: 41.1, model: 50.6, edge: 9.4, highlight: false, fatigue: {b2b: false, restDays: 3, label: "3d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 3, seriesGame: 2, predStat: 4.7, lineupAdj: 0.1, oppDef: 108.7, stat: "REB"},
+    {id: "nba-13", player: "Donovan Mitchell", team: "CLE", opp: "@ DET", gameTime: "2026-05-07T23:10:00Z", market: "Assists", line: 3.5, side: "UNDER", book: 56.4, model: 47.6, edge: 8.8, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 3.4, lineupAdj: 0.3, oppDef: 101.6, stat: "AST"},
+    {id: "nba-14", player: "Deandre Ayton", team: "LAL", opp: "@ OKC", gameTime: "2026-05-08T01:40:00Z", market: "Rebounds", line: 8.5, side: "UNDER", book: 49.6, model: 41.3, edge: 8.3, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 6.8, lineupAdj: 0.2, oppDef: 108.8, stat: "REB"},
+    {id: "nba-15", player: "Ausar Thompson", team: "CLE", opp: "@ DET", gameTime: "2026-05-07T23:10:00Z", market: "Rebounds", line: 6.5, side: "UNDER", book: 56.7, model: 48.4, edge: 8.3, highlight: false, fatigue: {b2b: false, restDays: 2, label: "2d rest"}, steam: {moved: false, dir: "UP", label: "Flat"}, restDays: 2, seriesGame: 2, predStat: 6.5, lineupAdj: 0.3, oppDef: 101.6, stat: "REB"}
   ];
 
       // ── EPL: replace this empty array with your pipeline output ──────
@@ -680,13 +676,13 @@
         NBA: {
           code: "NBA",
           name: "National Basketball Association",
-          metaLabel: "Player Props · 2026-05-06",
-          markets: ["All Markets", "Moneyline", "Threes", "Blocks"],
+          metaLabel: "Player Props · 2026-05-07",
+          markets: ["All Markets", "Moneyline", "Points", "Rebounds", "Assists"],
           rows: decorate(NBA_EDGES),
           contextHeader: "Fatigue · Steam",
           sources: ["NBA Stats API", "Kalshi", "Odds API", "pbpstats"],
           primaryFeed: "NBA Stats API",
-          scanned: 369,
+          scanned: 376,
         },
         EPL: {
           code: "EPL",
@@ -847,7 +843,7 @@
                 </div>
                 <div className="leading-tight">
                   <div className="text-[15px] font-bold tracking-tight text-slate-900">
-                    Dialed
+                    EdgeModel
                   </div>
                   <div className="text-[11px] text-slate-500">
                     Today's best plays
@@ -1885,7 +1881,7 @@
               />
 
               <div className="text-[11px] text-slate-400 pt-2 pb-6 text-center">
-                Dialed · Sources: {leagueData.sources.join(" · ")} · For
+                EdgeModel · Sources: {leagueData.sources.join(" · ")} · For
                 research only.
               </div>
             </main>
